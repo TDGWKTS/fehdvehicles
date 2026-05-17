@@ -586,7 +586,12 @@
     const API_URL = "https://vehicle-api.tdgwkts.workers.dev/exec";
     
     async function callAPI(action, extraData = {}) {
-        const payload = JSON.stringify({ action, ...extraData });
+        // 自動帶入 session（如果存在）
+        const payload = JSON.stringify({ 
+            action, 
+            session: currentSession || null,
+            ...extraData 
+        });
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -611,12 +616,32 @@
     let quotaCacheExpiry = null;
     let midnightQuotaDistrictsList = [];
 
+    function useDefaultQuota() {
+        midnightQuotaMap = {
+            "Sham Shui Po": 5, "Mong Kok": 8, "Yau Tsim": 4,
+            "Central & Western": 5, "Kowloon City": 2, "Wong Tai Sin": 1,
+            "Wan Chai": 2, "HK, KLN & NT": 26
+        };
+        midnightQuotaDistrictsList = Object.keys(midnightQuotaMap);
+        quotaCacheExpiry = Date.now() + 5 * 60 * 1000;
+        console.log("📊 使用預設配額:", midnightQuotaDistrictsList.length, "個區域");
+    }
+
     async function loadMidnightQuotaFromR2(forceRefresh = false) {
         if (!forceRefresh && quotaCacheExpiry && Date.now() < quotaCacheExpiry && Object.keys(midnightQuotaMap).length > 0) {
             return true;
         }
+        
+        // 如果尚未登入，直接使用預設值
+        if (!currentSession || !currentSession.userId) {
+            console.log("尚未登入，使用預設配額");
+            useDefaultQuota();
+            return false;
+        }
+        
         try {
             const result = await callAPI('getMidnightQuota');
+            
             if (result.success && result.data && result.data.length > 0) {
                 const quotaData = {};
                 const districtsList = [];
@@ -634,13 +659,7 @@
             }
         } catch (error) {
             console.error("載入配額失敗，使用預設值:", error);
-            midnightQuotaMap = {
-                "Sham Shui Po": 5, "Mong Kok": 8, "Yau Tsim": 4,
-                "Central & Western": 5, "Kowloon City": 2, "Wong Tai Sin": 1,
-                "Wan Chai": 2, "HK, KLN & NT": 26
-            };
-            midnightQuotaDistrictsList = Object.keys(midnightQuotaMap);
-            quotaCacheExpiry = Date.now() + 5 * 60 * 1000;
+            useDefaultQuota();
             return false;
         }
     }
@@ -711,44 +730,50 @@
         renderCurrentPageData();
     }
     
-    function renderCurrentPageData() {
-    const start = (currentPage - 1) * rowsPerPage;
-    const pageData = currentFilteredDataForPaging.slice(start, start + rowsPerPage);
-    const tbody = document.getElementById('vehicleList');
-    const recordSpan = document.getElementById('recordCount');
-    if(!pageData.length){ 
-        tbody.innerHTML='<tr><td colspan="13" class="text-center text-muted">暫無符合車輛</td></tr>';
-        if(recordSpan) recordSpan.innerText="0 筆"; 
-        renderPagination(0,1);
-        return; 
+    function safeSplitDate(dateStr) {
+        if (!dateStr) return '-';
+        if (typeof dateStr === 'string') {
+            return dateStr.split('T')[0];
+        }
+        if (dateStr instanceof Date) {
+            return dateStr.toISOString().split('T')[0];
+        }
+        return '-';
     }
-    tbody.innerHTML = pageData.map(v => { 
-        // FIX 3 (Crash mitigation Part B): Explicitly parse parameters as text, preventing type crashes
-        const rawStart = v.startDate ? String(v.startDate) : '';
-        const rawExpiry = v.expiryDate ? String(v.expiryDate) : '';
-        
-        const startDate = rawStart ? rawStart.split('T')[0] : '-'; 
-        const expiry = rawExpiry ? rawExpiry.split('T')[0] : '-'; 
-        
-        return `<tr>
-                    <td><strong>${escapeHtml(v.plate)}</strong></td>
-                    <td>${v.pgvw}</td>
-                    <td>${startDate}</td>
-                    <td>${expiry}</td>
-                    <td>${v.vehicleDailyLimit||5}</td>
-                    <td>${v.midnight==='Y'?'✅ 是':'❌ 否'}</td>
-                    <td>${escapeHtml(v.district)}</td>
-                    <td>${v.districtDailyLimit||0}</td>
-                    <td>${escapeHtml(v.createdBy)||'-'}</td>
-                    <td>${escapeHtml(v.contactPerson)||'-'}</td>
-                    <td>${escapeHtml(v.contactTel)||'-'}</td>
-                    <td>${escapeHtml(v.contactEmail)||'-'}</td>
-                    <td>${currentRole === 'fehd' ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle('${v.plate.replace(/'/g, "\\'")}')">刪除</button>` : '🔍 唯讀'}</td>
-                </tr>`; 
-    }).join('');
-    if(recordSpan) recordSpan.innerText = `${currentFilteredDataForPaging.length} 筆`;
-    renderPagination(currentFilteredDataForPaging.length, currentPage);
-}
+    
+    function renderCurrentPageData() {
+        const start = (currentPage - 1) * rowsPerPage;
+        const pageData = currentFilteredDataForPaging.slice(start, start + rowsPerPage);
+        const tbody = document.getElementById('vehicleList');
+        const recordSpan = document.getElementById('recordCount');
+        if(!pageData.length){ 
+            tbody.innerHTML='<tr><td colspan="13" class="text-center text-muted">暫無符合車輛</td></tr>';
+            if(recordSpan) recordSpan.innerText="0 筆"; 
+            renderPagination(0,1);
+            return; 
+        }
+        tbody.innerHTML = pageData.map(v => { 
+            const startDate = safeSplitDate(v.startDate);
+            const expiry = safeSplitDate(v.expiryDate);
+            return `<tr>
+                        <td><strong>${escapeHtml(v.plate)}</strong></td>
+                        <td>${v.pgvw}</td>
+                        <td>${startDate}</td>
+                        <td>${expiry}</td>
+                        <td>${v.vehicleDailyLimit||5}</td>
+                        <td>${v.midnight==='Y'?'✅ 是':'❌ 否'}</td>
+                        <td>${escapeHtml(v.district)}</td>
+                        <td>${v.districtDailyLimit||0}</td>
+                        <td>${escapeHtml(v.createdBy)||'-'}</td>
+                        <td>${escapeHtml(v.contactPerson)||'-'}</td>
+                        <td>${escapeHtml(v.contactTel)||'-'}</td>
+                        <td>${escapeHtml(v.contactEmail)||'-'}</td>
+                        <td>${currentRole === 'fehd' ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle('${v.plate.replace(/'/g, "\\'")}')">刪除</button>` : '🔍 唯讀'}</td>
+                    </tr>`; 
+        }).join('');
+        if(recordSpan) recordSpan.innerText = `${currentFilteredDataForPaging.length} 筆`;
+        renderPagination(currentFilteredDataForPaging.length, currentPage);
+    }
     
     // ======================= 核心變數 =======================
     let currentSession = null;
@@ -780,7 +805,7 @@
         } else if (currentUserViewDistricts !== 'all' && Array.isArray(currentUserViewDistricts) && currentUserViewDistricts.length === 1) {
             targetDistrict = standardizeDistrict(currentUserViewDistricts[0]);
         }
-        if (targetDistrict) {
+        if (targetDistrict && vehiclesData.length > 0) {
             const districtVehicles = vehiclesData.filter(v => standardizeDistrict(v.district) === targetDistrict && v.contactPerson);
             if (districtVehicles.length > 0) {
                 const latest = districtVehicles[districtVehicles.length - 1];
@@ -870,7 +895,7 @@
         }
         
         try {
-            const result = await callAPI('getVehicles', { session: currentSession });
+            const result = await callAPI('getVehicles');
             if (result.success && result.data) {
                 vehiclesData = result.data;
                 localStorage.setItem(cacheKey, JSON.stringify(vehiclesData));
@@ -887,7 +912,33 @@
             }
         }
     }
-            
+    
+    async function initByRole() {
+        // 先使用預設配額（避免未登入時呼叫 API）
+        useDefaultQuota();
+        
+        let urlRole = getUrlParameter('role');
+        if (urlRole === 'weighbridge') urlRole = 'epd';
+        currentRole = (urlRole === 'epd') ? 'epd' : 'fehd';
+        if (currentRole === 'fehd') {
+            document.getElementById('loginTitle').innerHTML = '食環署車輛管理系統';
+            document.getElementById('mainTitle').innerHTML = '食環署車輛管理系統';
+            document.getElementById('loginBtn').innerHTML = '食環署登入';
+            document.getElementById('vehicleFormSection').style.display = 'block';
+            document.getElementById('batchSection').style.display = 'block';
+        } else {
+            document.getElementById('loginTitle').innerHTML = '環保署車輛管理系統';
+            document.getElementById('mainTitle').innerHTML = '環保署車輛管理系統';
+            document.getElementById('loginBtn').innerHTML = '環保署登入';
+            document.getElementById('vehicleFormSection').style.display = 'none';
+            document.getElementById('batchSection').style.display = 'none';
+        }
+        const today = new Date();
+        const yyyy = today.getFullYear(), mm = String(today.getMonth() + 1).padStart(2,'0'), dd = String(today.getDate()).padStart(2,'0');
+        const startDateInput = document.getElementById('startDate');
+        if (startDateInput) startDateInput.value = `${yyyy}-${mm}-${dd}`;
+        await loadUserList();
+        
         // 初始化 Modal
         uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
     }
@@ -962,16 +1013,8 @@
                 vehiclesData = [];
             }
             
-            if (result.initialMidnightQuota && result.initialMidnightQuota.length > 0) {
-                const quotaData = {};
-                const districtsList = [];
-                result.initialMidnightQuota.forEach(item => {
-                    quotaData[item.district] = item.limit;
-                    districtsList.push(item.district);
-                });
-                midnightQuotaMap = quotaData;
-                midnightQuotaDistrictsList = districtsList;
-            }
+            // 登入成功後重新載入配額（從 R2）
+            await loadMidnightQuotaFromR2(true);
             
             document.getElementById('loginPage').style.display = 'none';
             document.getElementById('mainPage').style.display = 'block';
@@ -1234,7 +1277,7 @@
                 finalData = finalData.filter((_, idx) => !quotaErrors.some(e => e.includes(finalData[idx].plate)));
                 if (!finalData.length) { alert("沒有有效的車輛資料或配額已滿"); showLoading(false); return; }
                 
-                const result = await callAPI('batchUpload', { dataList: finalData, session: currentSession });
+                const result = await callAPI('batchUpload', { dataList: finalData });
                 if (result.success) { 
                     localStorage.removeItem('vehicles_cache_' + currentSession.userId);
                     const resultDiv = document.getElementById('batchResult'); 
@@ -1263,7 +1306,7 @@
         if(!confirm(`確定要刪除車輛 ${plate} 嗎？`)) return; 
         showLoading(true); 
         try{ 
-            const result = await callAPI('deleteVehicle', { plate, session: currentSession });
+            const result = await callAPI('deleteVehicle', { plate });
             if(result.success){ alert(result.msg); localStorage.removeItem('vehicles_cache_' + currentSession.userId); await loadVehicles(true); } 
             else { alert("刪除失敗："+result.msg); }
         }catch(err){ alert("網路錯誤："+err); } finally{ showLoading(false); } 
@@ -1274,12 +1317,12 @@
         if(!currentSession) return; 
         showLoading(true); 
         try{ 
-            const result = await callAPI('getVehicles', { session: currentSession });
+            const result = await callAPI('getVehicles');
             if(result.success && result.data.length){ 
                 const sheetData=[["車牌","PGVW","開始日期","有效日期","車輛每日上限","凌晨授權","區域","區域每日上限","建立者","聯絡人","電話","電郵"]]; 
                 result.data.forEach(v=>{ 
                     sheetData.push([
-                        v.plate, v.pgvw, v.startDate?.split('T')[0]||"", v.expiryDate?.split('T')[0]||"", 
+                        v.plate, v.pgvw, safeSplitDate(v.startDate), safeSplitDate(v.expiryDate), 
                         v.vehicleDailyLimit||5, v.midnight==='Y'?"是":"否", v.district, v.districtDailyLimit||0, 
                         v.createdBy||"", v.contactPerson||"", v.contactTel||"", v.contactEmail||""
                     ]); 
@@ -1291,7 +1334,6 @@
         } catch(err){ alert("匯出失敗："+err); } finally{ showLoading(false); } 
     }
     
-    // ======================= FEHD 下載範例 =======================
     function downloadFEHDTemplate() {
         const data = [
             ["車牌號碼", "PGVW", "開始日期", "有效日期", "車輛每日上限", "凌晨授權", "所屬區域", "聯絡人", "電話", "電郵"],
@@ -1306,123 +1348,134 @@
     
     // ======================= 超級管理員上傳功能 =======================
     function openUploadModal() {
-        if (uploadModal) {
-            uploadModal.show();
-        }
+        const fileInput = document.getElementById('systemExcelFile');
+        if (fileInput) fileInput.value = '';
+        
+        const progressArea = document.getElementById('uploadProgressArea');
+        const sheetStatusList = document.getElementById('sheetStatusList');
+        if (progressArea) progressArea.style.display = 'none';
+        if (sheetStatusList) sheetStatusList.innerHTML = '';
+        
+        if (uploadModal) uploadModal.show();
     }
     
-    aasync function uploadSystemExcel() {
-    const fileInput = document.getElementById('systemExcelFile');
-    const file = fileInput.files[0];
-    if (!file) {
-        alert("請選擇 Excel 檔案");
-        return;
-    }
-    
-    const progressArea = document.getElementById('uploadProgressArea');
-    const sheetStatusList = document.getElementById('sheetStatusList');
-    const progressBar = document.getElementById('uploadProgressBar');
-    
-    progressArea.style.display = 'block';
-    sheetStatusList.innerHTML = '';
-    progressBar.style.width = '0%';
-    
-    try {
-        const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data, { type: 'array' });
+    async function uploadSystemExcel() {
+        const fileInput = document.getElementById('systemExcelFile');
+        const file = fileInput.files[0];
         
-        const sheetMapping = {
-            'Users': 'users.json',
-            'Vehicles': 'vehicles.json',
-            'Expired': 'expired.json',
-            'DistrictQuota': 'districtQuota.json',
-            'MidnightLimit': 'midnightQuota.json',
-            'Email': 'emailList.json'
-        };
-        
-        const sheetNames = workbook.SheetNames;
-        const sheetsToUpload = Object.keys(sheetMapping);
-        const missingSheets = sheetsToUpload.filter(s => !sheetNames.includes(s));
-        
-        if (missingSheets.length > 0) {
-            sheetStatusList.innerHTML = `<div class="alert alert-danger">缺少工作表: ${missingSheets.join(', ')}</div>`;
-            alert(`缺少工作表: ${missingSheets.join(', ')}`);
-            fileInput.value = ""; // FIX 1: Reset on structural template error
+        if (!file) {
+            alert("請選擇 Excel 檔案");
             return;
         }
         
-        let completed = 0;
-        const total = sheetsToUpload.length;
+        const progressArea = document.getElementById('uploadProgressArea');
+        const sheetStatusList = document.getElementById('sheetStatusList');
+        const progressBar = document.getElementById('uploadProgressBar');
         
-        for (const sheetName of sheetsToUpload) {
-            const sheetItem = document.createElement('div');
-            sheetItem.className = 'sheet-item uploading';
-            sheetItem.id = `sheet-${sheetName}`;
-            sheetItem.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${sheetName} - 上傳中...`;
-            sheetStatusList.appendChild(sheetItem);
+        progressArea.style.display = 'block';
+        sheetStatusList.innerHTML = '';
+        progressBar.style.width = '0%';
+        
+        try {
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
             
-            const worksheet = workbook.Sheets[sheetName];
+            const sheetMapping = {
+                'Users': 'users.json',
+                'Vehicles': 'vehicles.json',
+                'Expired': 'expired.json',
+                'DistrictQuota': 'districtQuota.json',
+                'MidnightLimit': 'midnightQuota.json',
+                'Email': 'emailList.json'
+            };
             
-            // FIX 3 (Data integrity part A): Standardize all Excel rows dynamically to handle parsed date formats
-            const rawJsonData = XLSX.utils.sheet_to_json(worksheet);
-            const jsonData = rawJsonData.map(row => {
-                let formattedRow = { ...row };
-                if (row.expiryDate) formattedRow.expiryDate = formatExcelDate(row.expiryDate);
-                if (row.startDate) formattedRow.startDate = formatExcelDate(row.startDate);
-                return formattedRow;
-            });
+            const sheetNames = workbook.SheetNames;
+            const sheetsToUpload = Object.keys(sheetMapping);
+            const missingSheets = sheetsToUpload.filter(s => !sheetNames.includes(s));
             
-            const targetKey = sheetMapping[sheetName];
-            
-            const response = await fetch(`${API_URL.replace('/exec', '')}/api/upload/${targetKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    data: jsonData,
-                    secret: 'WKTS_UPLOAD_SECRET'
-                })
-            });
-            
-            const result = await response.json();
-            const itemElement = document.getElementById(`sheet-${sheetName}`);
-            
-            if (result.success) {
-                itemElement.className = 'sheet-item success';
-                itemElement.innerHTML = `<i class="fas fa-check-circle"></i> ${sheetName} - 成功上傳 ${jsonData.length} 筆`;
-            } else {
-                itemElement.className = 'sheet-item error';
-                itemElement.innerHTML = `<i class="fas fa-times-circle"></i> ${sheetName} - 上傳失敗: ${result.msg}`;
+            if (missingSheets.length > 0) {
+                sheetStatusList.innerHTML = `<div class="alert alert-danger">缺少工作表: ${missingSheets.join(', ')}</div>`;
+                alert(`缺少工作表: ${missingSheets.join(', ')}`);
+                fileInput.value = '';
+                return;
             }
             
-            completed++;
-            progressBar.style.width = `${(completed / total) * 100}%`;
-        }
-        
-        alert(`✅ 上傳完成！共 ${total} 個工作表已更新到 R2`);
-        
-        // FIX 2: Instead of forcefully breaking state via location.reload(), cleanly close out layout wrappers
-        setTimeout(async () => {
-            if (uploadModal) uploadModal.hide();
-            // Reset modal presentation view layers for subsequent entries
-            progressArea.style.display = 'none';
-            progressBar.style.width = '0%';
-            sheetStatusList.innerHTML = '';
+            let completed = 0;
+            const total = sheetsToUpload.length;
+            let hasError = false;
             
-            // Silently fetch fresh operational datasets in the background
-            showLoading(true);
-            await loadMidnightQuotaFromR2(true);
-            await loadVehicles(true);
-            showLoading(false);
-        }, 1500);
-        
-    } catch (err) {
-        console.error('上傳錯誤:', err);
-        sheetStatusList.innerHTML = `<div class="alert alert-danger">上傳失敗: ${err.message}</div>`;
-        alert(`上傳失敗: ${err.message}`);
-    } finally {
-        fileInput.value = ""; // FIX 1: Ensures you can immediately clear state and select again
+            for (const sheetName of sheetsToUpload) {
+                const sheetItem = document.createElement('div');
+                sheetItem.className = 'sheet-item uploading';
+                sheetItem.id = `sheet-${sheetName}`;
+                sheetItem.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${sheetName} - 上傳中...`;
+                sheetStatusList.appendChild(sheetItem);
+                
+                const worksheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                const targetKey = sheetMapping[sheetName];
+                
+                try {
+                    const response = await fetch(`${API_URL.replace('/exec', '')}/api/upload/${targetKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            data: jsonData,
+                            secret: 'WKTS_UPLOAD_SECRET'
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    const itemElement = document.getElementById(`sheet-${sheetName}`);
+                    
+                    if (result.success) {
+                        itemElement.className = 'sheet-item success';
+                        itemElement.innerHTML = `<i class="fas fa-check-circle"></i> ${sheetName} - 成功上傳 ${jsonData.length} 筆`;
+                    } else {
+                        itemElement.className = 'sheet-item error';
+                        itemElement.innerHTML = `<i class="fas fa-times-circle"></i> ${sheetName} - 上傳失敗: ${result.msg}`;
+                        hasError = true;
+                    }
+                } catch (err) {
+                    const itemElement = document.getElementById(`sheet-${sheetName}`);
+                    itemElement.className = 'sheet-item error';
+                    itemElement.innerHTML = `<i class="fas fa-times-circle"></i> ${sheetName} - 網路錯誤: ${err.message}`;
+                    hasError = true;
+                }
+                
+                completed++;
+                progressBar.style.width = `${(completed / total) * 100}%`;
+            }
+            
+            if (hasError) {
+                alert(`⚠️ 部分工作表上傳失敗，請檢查後重試`);
+                fileInput.value = '';
+            } else {
+                alert(`✅ 上傳完成！共 ${total} 個工作表已更新到 R2`);
+                if (uploadModal) uploadModal.hide();
+                fileInput.value = '';
+                
+                showLoading(true);
+                try {
+                    await loadMidnightQuotaFromR2(true);
+                    await loadVehicles(true);
+                    updateMidnightQuotaPanel(vehiclesData, currentUserViewDistricts);
+                    showLoading(false);
+                } catch (err) {
+                    console.error("重新載入資料失敗:", err);
+                    showLoading(false);
+                    if (confirm("資料已上傳成功，但重新載入失敗。是否重新整理頁面？")) {
+                        location.reload();
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('上傳錯誤:', err);
+            sheetStatusList.innerHTML = `<div class="alert alert-danger">上傳失敗: ${err.message}</div>`;
+            alert(`上傳失敗: ${err.message}`);
+            fileInput.value = '';
+        }
     }
-}
     
     function downloadSystemTemplate() {
         const sheets = {
@@ -1529,14 +1582,14 @@
             
             if (newExpiry > existingExpiry) {
                 const confirmMsg = `⚠️ 車輛 ${plate} (${district}) 已存在！\n` +
-                                   `舊有效日期: ${existing.expiryDate?.split('T')[0] || '-'}\n` +
+                                   `舊有效日期: ${safeSplitDate(existing.expiryDate)}\n` +
                                    `新有效日期: ${expiryDate}\n\n` +
                                    `新記錄的有效日期較長，將會取代舊記錄。\n是否繼續？`;
                 if (!confirm(confirmMsg)) return;
-                await callAPI('deleteVehicle', { plate, session: currentSession });
+                await callAPI('deleteVehicle', { plate });
             } else {
                 alert(`❌ 車輛 ${plate} (${district}) 已存在！\n` +
-                      `現有有效日期: ${existing.expiryDate?.split('T')[0] || '-'}\n` +
+                      `現有有效日期: ${safeSplitDate(existing.expiryDate)}\n` +
                       `新有效日期: ${expiryDate}\n\n` +
                       `現有記錄的有效日期較長，已保留原有記錄。`);
                 return;
@@ -1554,7 +1607,7 @@
         
         showLoading(true);
         try {
-            const result = await callAPI('addVehicle', { data, session: currentSession });
+            const result = await callAPI('addVehicle', { data });
             if (result.success) { 
                 alert(result.msg); 
                 localStorage.removeItem('vehicles_cache_' + currentSession.userId);
