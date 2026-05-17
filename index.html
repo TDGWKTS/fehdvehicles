@@ -712,38 +712,43 @@
     }
     
     function renderCurrentPageData() {
-        const start = (currentPage - 1) * rowsPerPage;
-        const pageData = currentFilteredDataForPaging.slice(start, start + rowsPerPage);
-        const tbody = document.getElementById('vehicleList');
-        const recordSpan = document.getElementById('recordCount');
-        if(!pageData.length){ 
-            tbody.innerHTML='<tr><td colspan="13" class="text-center text-muted">暫無符合車輛</td></tr>';
-            if(recordSpan) recordSpan.innerText="0 筆"; 
-            renderPagination(0,1);
-            return; 
-        }
-        tbody.innerHTML = pageData.map(v => { 
-            const startDate = v.startDate ? v.startDate.split('T')[0] : '-'; 
-            const expiry = v.expiryDate ? v.expiryDate.split('T')[0] : '-'; 
-            return `<tr>
-                        <td><strong>${escapeHtml(v.plate)}</strong></td>
-                        <td>${v.pgvw}</td>
-                        <td>${startDate}</td>
-                        <td>${expiry}</td>
-                        <td>${v.vehicleDailyLimit||5}</td>
-                        <td>${v.midnight==='Y'?'✅ 是':'❌ 否'}</td>
-                        <td>${escapeHtml(v.district)}</td>
-                        <td>${v.districtDailyLimit||0}</td>
-                        <td>${escapeHtml(v.createdBy)||'-'}</td>
-                        <td>${escapeHtml(v.contactPerson)||'-'}</td>
-                        <td>${escapeHtml(v.contactTel)||'-'}</td>
-                        <td>${escapeHtml(v.contactEmail)||'-'}</td>
-                        <td>${currentRole === 'fehd' ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle('${v.plate.replace(/'/g, "\\'")}')">刪除</button>` : '🔍 唯讀'}</td>
-                    </tr>`; 
-        }).join('');
-        if(recordSpan) recordSpan.innerText = `${currentFilteredDataForPaging.length} 筆`;
-        renderPagination(currentFilteredDataForPaging.length, currentPage);
+    const start = (currentPage - 1) * rowsPerPage;
+    const pageData = currentFilteredDataForPaging.slice(start, start + rowsPerPage);
+    const tbody = document.getElementById('vehicleList');
+    const recordSpan = document.getElementById('recordCount');
+    if(!pageData.length){ 
+        tbody.innerHTML='<tr><td colspan="13" class="text-center text-muted">暫無符合車輛</td></tr>';
+        if(recordSpan) recordSpan.innerText="0 筆"; 
+        renderPagination(0,1);
+        return; 
     }
+    tbody.innerHTML = pageData.map(v => { 
+        // FIX 3 (Crash mitigation Part B): Explicitly parse parameters as text, preventing type crashes
+        const rawStart = v.startDate ? String(v.startDate) : '';
+        const rawExpiry = v.expiryDate ? String(v.expiryDate) : '';
+        
+        const startDate = rawStart ? rawStart.split('T')[0] : '-'; 
+        const expiry = rawExpiry ? rawExpiry.split('T')[0] : '-'; 
+        
+        return `<tr>
+                    <td><strong>${escapeHtml(v.plate)}</strong></td>
+                    <td>${v.pgvw}</td>
+                    <td>${startDate}</td>
+                    <td>${expiry}</td>
+                    <td>${v.vehicleDailyLimit||5}</td>
+                    <td>${v.midnight==='Y'?'✅ 是':'❌ 否'}</td>
+                    <td>${escapeHtml(v.district)}</td>
+                    <td>${v.districtDailyLimit||0}</td>
+                    <td>${escapeHtml(v.createdBy)||'-'}</td>
+                    <td>${escapeHtml(v.contactPerson)||'-'}</td>
+                    <td>${escapeHtml(v.contactTel)||'-'}</td>
+                    <td>${escapeHtml(v.contactEmail)||'-'}</td>
+                    <td>${currentRole === 'fehd' ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle('${v.plate.replace(/'/g, "\\'")}')">刪除</button>` : '🔍 唯讀'}</td>
+                </tr>`; 
+    }).join('');
+    if(recordSpan) recordSpan.innerText = `${currentFilteredDataForPaging.length} 筆`;
+    renderPagination(currentFilteredDataForPaging.length, currentPage);
+}
     
     // ======================= 核心變數 =======================
     let currentSession = null;
@@ -882,31 +887,7 @@
             }
         }
     }
-    
-    async function initByRole() {
-        await loadMidnightQuotaFromR2(false);
-        let urlRole = getUrlParameter('role');
-        if (urlRole === 'weighbridge') urlRole = 'epd';
-        currentRole = (urlRole === 'epd') ? 'epd' : 'fehd';
-        if (currentRole === 'fehd') {
-            document.getElementById('loginTitle').innerHTML = '食環署車輛管理系統';
-            document.getElementById('mainTitle').innerHTML = '食環署車輛管理系統';
-            document.getElementById('loginBtn').innerHTML = '食環署登入';
-            document.getElementById('vehicleFormSection').style.display = 'block';
-            document.getElementById('batchSection').style.display = 'block';
-        } else {
-            document.getElementById('loginTitle').innerHTML = '環保署車輛管理系統';
-            document.getElementById('mainTitle').innerHTML = '環保署車輛管理系統';
-            document.getElementById('loginBtn').innerHTML = '環保署登入';
-            document.getElementById('vehicleFormSection').style.display = 'none';
-            document.getElementById('batchSection').style.display = 'none';
-        }
-        const today = new Date();
-        const yyyy = today.getFullYear(), mm = String(today.getMonth() + 1).padStart(2,'0'), dd = String(today.getDate()).padStart(2,'0');
-        const startDateInput = document.getElementById('startDate');
-        if (startDateInput) startDateInput.value = `${yyyy}-${mm}-${dd}`;
-        await loadUserList();
-        
+            
         // 初始化 Modal
         uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
     }
@@ -1330,95 +1311,118 @@
         }
     }
     
-    async function uploadSystemExcel() {
-        const file = document.getElementById('systemExcelFile').files[0];
-        if (!file) {
-            alert("請選擇 Excel 檔案");
+    aasync function uploadSystemExcel() {
+    const fileInput = document.getElementById('systemExcelFile');
+    const file = fileInput.files[0];
+    if (!file) {
+        alert("請選擇 Excel 檔案");
+        return;
+    }
+    
+    const progressArea = document.getElementById('uploadProgressArea');
+    const sheetStatusList = document.getElementById('sheetStatusList');
+    const progressBar = document.getElementById('uploadProgressBar');
+    
+    progressArea.style.display = 'block';
+    sheetStatusList.innerHTML = '';
+    progressBar.style.width = '0%';
+    
+    try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array' });
+        
+        const sheetMapping = {
+            'Users': 'users.json',
+            'Vehicles': 'vehicles.json',
+            'Expired': 'expired.json',
+            'DistrictQuota': 'districtQuota.json',
+            'MidnightLimit': 'midnightQuota.json',
+            'Email': 'emailList.json'
+        };
+        
+        const sheetNames = workbook.SheetNames;
+        const sheetsToUpload = Object.keys(sheetMapping);
+        const missingSheets = sheetsToUpload.filter(s => !sheetNames.includes(s));
+        
+        if (missingSheets.length > 0) {
+            sheetStatusList.innerHTML = `<div class="alert alert-danger">缺少工作表: ${missingSheets.join(', ')}</div>`;
+            alert(`缺少工作表: ${missingSheets.join(', ')}`);
+            fileInput.value = ""; // FIX 1: Reset on structural template error
             return;
         }
         
-        const progressArea = document.getElementById('uploadProgressArea');
-        const sheetStatusList = document.getElementById('sheetStatusList');
-        const progressBar = document.getElementById('uploadProgressBar');
+        let completed = 0;
+        const total = sheetsToUpload.length;
         
-        progressArea.style.display = 'block';
-        sheetStatusList.innerHTML = '';
-        progressBar.style.width = '0%';
-        
-        try {
-            const data = await file.arrayBuffer();
-            const workbook = XLSX.read(data, { type: 'array' });
+        for (const sheetName of sheetsToUpload) {
+            const sheetItem = document.createElement('div');
+            sheetItem.className = 'sheet-item uploading';
+            sheetItem.id = `sheet-${sheetName}`;
+            sheetItem.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${sheetName} - 上傳中...`;
+            sheetStatusList.appendChild(sheetItem);
             
-            const sheetMapping = {
-                'Users': 'users.json',
-                'Vehicles': 'vehicles.json',
-                'Expired': 'expired.json',
-                'DistrictQuota': 'districtQuota.json',
-                'MidnightLimit': 'midnightQuota.json',
-                'Email': 'emailList.json'
-            };
+            const worksheet = workbook.Sheets[sheetName];
             
-            const sheetNames = workbook.SheetNames;
-            const sheetsToUpload = Object.keys(sheetMapping);
-            const missingSheets = sheetsToUpload.filter(s => !sheetNames.includes(s));
+            // FIX 3 (Data integrity part A): Standardize all Excel rows dynamically to handle parsed date formats
+            const rawJsonData = XLSX.utils.sheet_to_json(worksheet);
+            const jsonData = rawJsonData.map(row => {
+                let formattedRow = { ...row };
+                if (row.expiryDate) formattedRow.expiryDate = formatExcelDate(row.expiryDate);
+                if (row.startDate) formattedRow.startDate = formatExcelDate(row.startDate);
+                return formattedRow;
+            });
             
-            if (missingSheets.length > 0) {
-                sheetStatusList.innerHTML = `<div class="alert alert-danger">缺少工作表: ${missingSheets.join(', ')}</div>`;
-                alert(`缺少工作表: ${missingSheets.join(', ')}`);
-                return;
+            const targetKey = sheetMapping[sheetName];
+            
+            const response = await fetch(`${API_URL.replace('/exec', '')}/api/upload/${targetKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    data: jsonData,
+                    secret: 'WKTS_UPLOAD_SECRET'
+                })
+            });
+            
+            const result = await response.json();
+            const itemElement = document.getElementById(`sheet-${sheetName}`);
+            
+            if (result.success) {
+                itemElement.className = 'sheet-item success';
+                itemElement.innerHTML = `<i class="fas fa-check-circle"></i> ${sheetName} - 成功上傳 ${jsonData.length} 筆`;
+            } else {
+                itemElement.className = 'sheet-item error';
+                itemElement.innerHTML = `<i class="fas fa-times-circle"></i> ${sheetName} - 上傳失敗: ${result.msg}`;
             }
             
-            let completed = 0;
-            const total = sheetsToUpload.length;
-            
-            for (const sheetName of sheetsToUpload) {
-                const sheetItem = document.createElement('div');
-                sheetItem.className = 'sheet-item uploading';
-                sheetItem.id = `sheet-${sheetName}`;
-                sheetItem.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${sheetName} - 上傳中...`;
-                sheetStatusList.appendChild(sheetItem);
-                
-                const worksheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet);
-                
-                const targetKey = sheetMapping[sheetName];
-                
-                const response = await fetch(`${API_URL.replace('/exec', '')}/api/upload/${targetKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        data: jsonData,
-                        secret: 'WKTS_UPLOAD_SECRET'
-                    })
-                });
-                
-                const result = await response.json();
-                const itemElement = document.getElementById(`sheet-${sheetName}`);
-                
-                if (result.success) {
-                    itemElement.className = 'sheet-item success';
-                    itemElement.innerHTML = `<i class="fas fa-check-circle"></i> ${sheetName} - 成功上傳 ${jsonData.length} 筆`;
-                } else {
-                    itemElement.className = 'sheet-item error';
-                    itemElement.innerHTML = `<i class="fas fa-times-circle"></i> ${sheetName} - 上傳失敗: ${result.msg}`;
-                }
-                
-                completed++;
-                progressBar.style.width = `${(completed / total) * 100}%`;
-            }
-            
-            alert(`✅ 上傳完成！共 ${total} 個工作表已更新到 R2`);
-            setTimeout(() => {
-                if (uploadModal) uploadModal.hide();
-                location.reload();
-            }, 2000);
-            
-        } catch (err) {
-            console.error('上傳錯誤:', err);
-            sheetStatusList.innerHTML = `<div class="alert alert-danger">上傳失敗: ${err.message}</div>`;
-            alert(`上傳失敗: ${err.message}`);
+            completed++;
+            progressBar.style.width = `${(completed / total) * 100}%`;
         }
+        
+        alert(`✅ 上傳完成！共 ${total} 個工作表已更新到 R2`);
+        
+        // FIX 2: Instead of forcefully breaking state via location.reload(), cleanly close out layout wrappers
+        setTimeout(async () => {
+            if (uploadModal) uploadModal.hide();
+            // Reset modal presentation view layers for subsequent entries
+            progressArea.style.display = 'none';
+            progressBar.style.width = '0%';
+            sheetStatusList.innerHTML = '';
+            
+            // Silently fetch fresh operational datasets in the background
+            showLoading(true);
+            await loadMidnightQuotaFromR2(true);
+            await loadVehicles(true);
+            showLoading(false);
+        }, 1500);
+        
+    } catch (err) {
+        console.error('上傳錯誤:', err);
+        sheetStatusList.innerHTML = `<div class="alert alert-danger">上傳失敗: ${err.message}</div>`;
+        alert(`上傳失敗: ${err.message}`);
+    } finally {
+        fileInput.value = ""; // FIX 1: Ensures you can immediately clear state and select again
     }
+}
     
     function downloadSystemTemplate() {
         const sheets = {
