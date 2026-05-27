@@ -599,6 +599,7 @@
     
     // ==================== API 設定 ====================
     const API_URL = "https://vehicle-api.tdgwkts.workers.dev/exec";
+    const API_BASE = "https://vehicle-api.tdgwkts.workers.dev";
     
     // ==================== 全域變數 ====================
     let currentSession = null;
@@ -860,7 +861,7 @@
                     <td>${v.contactTel || '-'}</td>
                     <td>${escapeHtml(v.contactEmail || '-')}</td>
                     <td>${currentRole === 'fehd' ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle('${escapeHtml(v.plate).replace(/'/g, "\\'")}')">刪除</button>` : '🔍 唯讀'}</td>
-                </tr>`;
+                </td>`;
             }).join('');
         }
         
@@ -1066,7 +1067,6 @@
                 loadMidnightQuotaFromR2(true)
             ]);
             
-            // 設定權限
             if (user.viewDistricts === 'all' || user.role === '超級管理員') {
                 currentUserViewDistricts = 'all';
             } else if (user.viewDistricts) {
@@ -1077,7 +1077,6 @@
                 currentUserViewDistricts = [];
             }
             
-            // 設定角色
             if (userId === 'WKTS' || user.role === '超級管理員') {
                 currentRole = 'fehd';
             } else if (user.role === '轉運站職員') {
@@ -1160,163 +1159,285 @@
         }
     }
     
-    // ==================== 匯出 Excel (全部英文標題，與上傳模板兼容) ====================
-async function exportExcel() {
-    if (!currentSession) {
-        alert("請先登入系統。");
-        return;
-    }
-    showLoading(true, "📎 準備匯出報表...");
-    try {
-        const userId = currentSession.userId;
-        const role = currentSession.role;
-        const todayStr = new Date().toISOString().split('T')[0];
-        const wb = XLSX.utils.book_new();
-        
-        // 判斷是否為超級管理員
-        const isAdmin = (userId === 'WKTS' || role === '超級管理員');
-        
-        if (isAdmin) {
-            console.log("👑 超級管理員模式：匯出完整 6 個工作表");
-            
-            const [vehicles, users, expired, districtQuota, midnightQuota, emailList] = await Promise.all([
-                callAPI('getVehicles').then(r => r.data || []),
-                callAPI('getUserList').then(r => r.users || []),
-                callAPI('getExpired').then(r => r.data || []),
-                callAPI('getDistrictQuota').then(r => r.data || []),
-                callAPI('getMidnightQuota').then(r => r.data || []),
-                callAPI('getEmailList').then(r => r.data || [])
-            ]);
-            
-            // ========== 工作表 1: Vehicles (英文標題，與 JSON key 一致) ==========
-            const vehiclesSheetData = [["plate", "pgvw", "startDate", "expiryDate", "vehicleDailyLimit", "midnight", "district", "districtDailyLimit", "createdBy", "contactPerson", "contactTel", "contactEmail", "createdAt", "updatedAt"]];
-            vehicles.forEach(v => {
-                vehiclesSheetData.push([
-                    v.plate || "", 
-                    v.pgvw || "", 
-                    formatDateToYMD(v.startDate), 
-                    formatDateToYMD(v.expiryDate),
-                    v.vehicleDailyLimit || 5, 
-                    v.midnight === 'Y' ? "Y" : "N", 
-                    v.district || "",
-                    v.districtDailyLimit || getDistrictDailyLimit(v.district), 
-                    v.createdBy || "",
-                    v.contactPerson || "", 
-                    v.contactTel || "", 
-                    v.contactEmail || "",
-                    v.createdAt || "",
-                    v.updatedAt || ""
-                ]);
-            });
-            const wsVehicles = XLSX.utils.aoa_to_sheet(vehiclesSheetData);
-            XLSX.utils.book_append_sheet(wb, wsVehicles, "Vehicles");
-            
-            // ========== 工作表 2: Users (英文標題) ==========
-            const usersSheetData = [["id", "password", "role", "district", "viewDistricts"]];
-            users.forEach(u => {
-                usersSheetData.push([
-                    u.id || "", 
-                    u.password || "", 
-                    u.role || "", 
-                    u.district || "", 
-                    u.viewDistricts || ""
-                ]);
-            });
-            const wsUsers = XLSX.utils.aoa_to_sheet(usersSheetData);
-            XLSX.utils.book_append_sheet(wb, wsUsers, "Users");
-            
-            // ========== 工作表 3: Expired (英文標題) ==========
-            const expiredSheetData = [["plate", "pgvw", "startDate", "expiryDate", "vehicleDailyLimit", "midnight", "district", "status", "notified", "notifiedDate", "deletedBy", "deletedAt"]];
-            expired.forEach(e => {
-                expiredSheetData.push([
-                    e.plate || "", 
-                    e.pgvw || "", 
-                    formatDateToYMD(e.startDate), 
-                    formatDateToYMD(e.expiryDate),
-                    e.vehicleDailyLimit || 5, 
-                    e.midnight === 'Y' ? "Y" : "N", 
-                    e.district || "",
-                    e.status || "", 
-                    e.notified ? "true" : "false", 
-                    formatDateToYMD(e.notifiedDate) || "",
-                    e.deletedBy || "", 
-                    e.deletedAt || ""
-                ]);
-            });
-            const wsExpired = XLSX.utils.aoa_to_sheet(expiredSheetData);
-            XLSX.utils.book_append_sheet(wb, wsExpired, "Expired");
-            
-            // ========== 工作表 4: DistrictQuota (英文標題) ==========
-            const districtSheetData = [["district", "dailyLimit"]];
-            districtQuota.forEach(dq => {
-                districtSheetData.push([dq.district || "", dq.dailyLimit || ""]);
-            });
-            const wsDistrict = XLSX.utils.aoa_to_sheet(districtSheetData);
-            XLSX.utils.book_append_sheet(wb, wsDistrict, "DistrictQuota");
-            
-            // ========== 工作表 5: MidnightLimit (英文標題) ==========
-            const midnightSheetData = [["district", "limit"]];
-            midnightQuota.forEach(mq => {
-                midnightSheetData.push([mq.district || "", mq.limit || ""]);
-            });
-            const wsMidnight = XLSX.utils.aoa_to_sheet(midnightSheetData);
-            XLSX.utils.book_append_sheet(wb, wsMidnight, "MidnightLimit");
-            
-            // ========== 工作表 6: Email (英文標題) ==========
-            const emailSheetData = [["email", "name", "role", "district", "notifyType", "notifyExpired", "notifyQuota", "active"]];
-            emailList.forEach(el => {
-                emailSheetData.push([
-                    el.email || "", 
-                    el.name || "", 
-                    el.role || "", 
-                    el.district || "",
-                    el.notifyType || "", 
-                    el.notifyExpired ? "true" : "false", 
-                    el.notifyQuota ? "true" : "false", 
-                    el.active ? "true" : "false"
-                ]);
-            });
-            const wsEmail = XLSX.utils.aoa_to_sheet(emailSheetData);
-            XLSX.utils.book_append_sheet(wb, wsEmail, "Email");
-            
-            XLSX.writeFile(wb, `System_Backup_${todayStr}.xlsx`);
-            alert(`✅ 完整系統備份匯出成功！\n- Vehicles: ${vehicles.length} 筆\n- Users: ${users.length} 筆\n- Expired: ${expired.length} 筆\n- DistrictQuota: ${districtQuota.length} 筆\n- MidnightLimit: ${midnightQuota.length} 筆\n- Email: ${emailList.length} 筆`);
-            
-        } else {
-            console.log("一般用戶模式：導出車輛列表");
-            
-            const exportData = currentFilteredDataForPaging.length > 0 ? currentFilteredDataForPaging : vehiclesData;
-            // 使用英文標題，與上傳模板格式一致
-            const sheetData = [["plate", "pgvw", "startDate", "expiryDate", "vehicleDailyLimit", "midnight", "district", "contactPerson", "contactTel", "contactEmail"]];
-            
-            exportData.forEach(v => {
-                sheetData.push([
-                    v.plate || "", 
-                    v.pgvw || "", 
-                    formatDateToYMD(v.startDate), 
-                    formatDateToYMD(v.expiryDate),
-                    v.vehicleDailyLimit || 5, 
-                    v.midnight === 'Y' ? "Y" : "N", 
-                    v.district || "",
-                    v.contactPerson || "", 
-                    v.contactTel || "", 
-                    v.contactEmail || ""
-                ]);
-            });
-            
-            const ws = XLSX.utils.aoa_to_sheet(sheetData);
-            XLSX.utils.book_append_sheet(wb, ws, "Vehicles");
-            const areaName = currentUserViewDistricts === 'all' ? 'All' : currentUserViewDistricts.join('_');
-            XLSX.writeFile(wb, `${areaName}_Vehicle_List_${todayStr}.xlsx`);
-            alert(`✅ Exported ${exportData.length} vehicles`);
+    // ==================== 匯出 Excel ====================
+    async function exportExcel() {
+        if (!currentSession) {
+            alert("請先登入系統。");
+            return;
         }
-    } catch (err) {
-        alert("Export failed: " + err.message);
-        console.error(err);
-    } finally {
-        showLoading(false);
+        showLoading(true, "📎 準備匯出報表...");
+        try {
+            const userId = currentSession.userId;
+            const role = currentSession.role;
+            const todayStr = new Date().toISOString().split('T')[0];
+            const wb = XLSX.utils.book_new();
+            
+            const isAdmin = (userId === 'WKTS' || role === '超級管理員');
+            
+            if (isAdmin) {
+                console.log("👑 超級管理員模式：匯出完整 6 個工作表");
+                
+                const [vehicles, users, expired, districtQuota, midnightQuota, emailList] = await Promise.all([
+                    callAPI('getVehicles').then(r => r.data || []),
+                    callAPI('getUserList').then(r => r.users || []),
+                    callAPI('getExpired').then(r => r.data || []),
+                    callAPI('getDistrictQuota').then(r => r.data || []),
+                    callAPI('getMidnightQuota').then(r => r.data || []),
+                    callAPI('getEmailList').then(r => r.data || [])
+                ]);
+                
+                // Vehicles
+                const vehiclesSheetData = [["plate", "pgvw", "startDate", "expiryDate", "vehicleDailyLimit", "midnight", "district", "districtDailyLimit", "createdBy", "contactPerson", "contactTel", "contactEmail", "createdAt", "updatedAt"]];
+                vehicles.forEach(v => {
+                    vehiclesSheetData.push([
+                        v.plate || "", v.pgvw || "", formatDateToYMD(v.startDate), formatDateToYMD(v.expiryDate),
+                        v.vehicleDailyLimit || 5, v.midnight === 'Y' ? "Y" : "N", v.district || "",
+                        v.districtDailyLimit || getDistrictDailyLimit(v.district), v.createdBy || "",
+                        v.contactPerson || "", v.contactTel || "", v.contactEmail || "",
+                        v.createdAt || "", v.updatedAt || ""
+                    ]);
+                });
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(vehiclesSheetData), "Vehicles");
+                
+                // Users
+                const usersSheetData = [["id", "password", "role", "district", "viewDistricts"]];
+                users.forEach(u => {
+                    usersSheetData.push([u.id || "", u.password || "", u.role || "", u.district || "", u.viewDistricts || ""]);
+                });
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(usersSheetData), "Users");
+                
+                // Expired
+                const expiredSheetData = [["plate", "pgvw", "startDate", "expiryDate", "vehicleDailyLimit", "midnight", "district", "status", "notified", "notifiedDate", "deletedBy", "deletedAt"]];
+                expired.forEach(e => {
+                    expiredSheetData.push([
+                        e.plate || "", e.pgvw || "", formatDateToYMD(e.startDate), formatDateToYMD(e.expiryDate),
+                        e.vehicleDailyLimit || 5, e.midnight === 'Y' ? "Y" : "N", e.district || "",
+                        e.status || "", e.notified ? "true" : "false", formatDateToYMD(e.notifiedDate) || "",
+                        e.deletedBy || "", e.deletedAt || ""
+                    ]);
+                });
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(expiredSheetData), "Expired");
+                
+                // DistrictQuota
+                const districtSheetData = [["district", "dailyLimit"]];
+                districtQuota.forEach(dq => {
+                    districtSheetData.push([dq.district || "", dq.dailyLimit || ""]);
+                });
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(districtSheetData), "DistrictQuota");
+                
+                // MidnightLimit
+                const midnightSheetData = [["district", "limit"]];
+                midnightQuota.forEach(mq => {
+                    midnightSheetData.push([mq.district || "", mq.limit || ""]);
+                });
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(midnightSheetData), "MidnightLimit");
+                
+                // Email
+                const emailSheetData = [["email", "name", "role", "district", "notifyType", "notifyExpired", "notifyQuota", "active"]];
+                emailList.forEach(el => {
+                    emailSheetData.push([
+                        el.email || "", el.name || "", el.role || "", el.district || "",
+                        el.notifyType || "", el.notifyExpired ? "true" : "false", 
+                        el.notifyQuota ? "true" : "false", el.active ? "true" : "false"
+                    ]);
+                });
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(emailSheetData), "Email");
+                
+                XLSX.writeFile(wb, `System_Backup_${todayStr}.xlsx`);
+                alert(`✅ 完整系統備份匯出成功！\n- Vehicles: ${vehicles.length} 筆\n- Users: ${users.length} 筆`);
+                
+            } else {
+                const exportData = currentFilteredDataForPaging.length > 0 ? currentFilteredDataForPaging : vehiclesData;
+                const sheetData = [["plate", "pgvw", "startDate", "expiryDate", "vehicleDailyLimit", "midnight", "district", "contactPerson", "contactTel", "contactEmail"]];
+                exportData.forEach(v => {
+                    sheetData.push([
+                        v.plate || "", v.pgvw || "", formatDateToYMD(v.startDate), formatDateToYMD(v.expiryDate),
+                        v.vehicleDailyLimit || 5, v.midnight === 'Y' ? "Y" : "N", v.district || "",
+                        v.contactPerson || "", v.contactTel || "", v.contactEmail || ""
+                    ]);
+                });
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), "Vehicles");
+                const areaName = currentUserViewDistricts === 'all' ? 'All' : currentUserViewDistricts.join('_');
+                XLSX.writeFile(wb, `${areaName}_Vehicle_List_${todayStr}.xlsx`);
+                alert(`✅ Exported ${exportData.length} vehicles`);
+            }
+        } catch (err) {
+            alert("Export failed: " + err.message);
+            console.error(err);
+        } finally {
+            showLoading(false);
+        }
     }
-}
+    
+    // ==================== 上傳到 R2 功能 (超級管理員專用) ====================
+    async function uploadSystemExcel() {
+        const fileInput = document.getElementById('systemExcelFile');
+        const file = fileInput.files[0];
+        if (!file) { 
+            alert("請選擇 Excel 檔案"); 
+            return; 
+        }
+        
+        const progressArea = document.getElementById('uploadProgressArea');
+        const sheetStatusList = document.getElementById('sheetStatusList');
+        const progressBar = document.getElementById('uploadProgressBar');
+        
+        progressArea.style.display = 'block';
+        sheetStatusList.innerHTML = '';
+        progressBar.style.width = '0%';
+        
+        try {
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
+            
+            // 工作表名稱與 R2 JSON 檔案的對應
+            const sheetMapping = {
+                'Users': 'users.json',
+                'Vehicles': 'vehicles.json',
+                'Expired': 'expired.json',
+                'DistrictQuota': 'districtQuota.json',
+                'MidnightLimit': 'midnightQuota.json',
+                'Email': 'emailList.json'
+            };
+            
+            const sheetNames = workbook.SheetNames;
+            const sheetsToUpload = Object.keys(sheetMapping);
+            const missingSheets = sheetsToUpload.filter(s => !sheetNames.includes(s));
+            
+            if (missingSheets.length > 0) {
+                sheetStatusList.innerHTML = `<div class="alert alert-danger">缺少工作表: ${missingSheets.join(', ')}</div>`;
+                alert(`缺少工作表: ${missingSheets.join(', ')}`);
+                fileInput.value = '';
+                return;
+            }
+            
+            let completed = 0;
+            const total = sheetsToUpload.length;
+            let hasError = false;
+            const UPLOAD_SECRET = "WKTS_UPLOAD_SECRET";
+            
+            for (const sheetName of sheetsToUpload) {
+                const sheetItem = document.createElement('div');
+                sheetItem.className = 'sheet-item uploading';
+                sheetItem.id = `sheet-${sheetName}`;
+                sheetItem.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${sheetName} - 上傳中...`;
+                sheetStatusList.appendChild(sheetItem);
+                
+                const worksheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                const targetKey = sheetMapping[sheetName];
+                
+                try {
+                    const response = await fetch(`${API_BASE}/api/upload/${targetKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            data: jsonData,
+                            secret: UPLOAD_SECRET
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    const itemElement = document.getElementById(`sheet-${sheetName}`);
+                    
+                    if (result.success) {
+                        itemElement.className = 'sheet-item success';
+                        itemElement.innerHTML = `<i class="fas fa-check-circle"></i> ${sheetName} - 成功上傳 ${jsonData.length} 筆`;
+                    } else {
+                        itemElement.className = 'sheet-item error';
+                        itemElement.innerHTML = `<i class="fas fa-times-circle"></i> ${sheetName} - 上傳失敗: ${result.msg || '未知錯誤'}`;
+                        hasError = true;
+                    }
+                } catch (err) {
+                    const itemElement = document.getElementById(`sheet-${sheetName}`);
+                    itemElement.className = 'sheet-item error';
+                    itemElement.innerHTML = `<i class="fas fa-times-circle"></i> ${sheetName} - 網路錯誤: ${err.message}`;
+                    hasError = true;
+                }
+                
+                completed++;
+                progressBar.style.width = `${(completed / total) * 100}%`;
+            }
+            
+            if (hasError) {
+                alert(`⚠️ 部分工作表上傳失敗，請檢查後重試`);
+                fileInput.value = '';
+            } else {
+                alert(`✅ 上傳完成！共 ${total} 個工作表已更新到 R2`);
+                if (uploadModal) uploadModal.hide();
+                fileInput.value = '';
+                
+                showLoading(true, "重新載入資料...");
+                try {
+                    await loadDistrictQuotaFromR2(true);
+                    await loadMidnightQuotaFromR2(true);
+                    await loadVehicles(true);
+                    updateMidnightQuotaPanel();
+                    showLoading(false);
+                    alert("✅ 資料已重新載入");
+                } catch (err) {
+                    console.error("重新載入資料失敗:", err);
+                    showLoading(false);
+                    if (confirm("資料已上傳成功，但重新載入失敗。是否重新整理頁面？")) {
+                        location.reload();
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('上傳錯誤:', err);
+            sheetStatusList.innerHTML = `<div class="alert alert-danger">上傳失敗: ${err.message}</div>`;
+            alert(`上傳失敗: ${err.message}`);
+            fileInput.value = '';
+        }
+    }
+    
+    function downloadSystemTemplate() {
+        const sheets = {
+            'Users': [
+                ['id', 'password', 'role', 'district', 'viewDistricts'],
+                ['WKTS', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', '超級管理員', 'WKTS', 'all'],
+                ['Sham Shui Po', 'ecd71870d1963316a97e3ac3408c9835ad8cf0f3c1bc703527c30265534f75ae', '區域主管', 'Sham Shui Po', 'Sham Shui Po']
+            ],
+            'Vehicles': [
+                ['plate', 'pgvw', 'startDate', 'expiryDate', 'vehicleDailyLimit', 'midnight', 'district', 'districtDailyLimit', 'createdBy', 'contactPerson', 'contactTel', 'contactEmail'],
+                ['AB1234', '5.5', '2024-01-01', '2025-12-31', '5', 'Y', 'Sham Shui Po', '50', 'WKTS', '陳先生', '91234567', 'chan@fehd.gov.hk']
+            ],
+            'Expired': [
+                ['plate', 'pgvw', 'startDate', 'expiryDate', 'vehicleDailyLimit', 'midnight', 'district']
+            ],
+            'DistrictQuota': [
+                ['district', 'dailyLimit'],
+                ['Sham Shui Po', '50'],
+                ['Mong Kok', '60']
+            ],
+            'MidnightLimit': [
+                ['district', 'limit'],
+                ['Sham Shui Po', '5'],
+                ['Mong Kok', '8']
+            ],
+            'Email': [
+                ['email', 'name', 'role', 'district', 'notifyType', 'notifyExpired', 'notifyQuota', 'active'],
+                ['tdgwkts@gmail.com', '系統管理員', '超級管理員', 'all', 'daily', 'true', 'true', 'true']
+            ]
+        };
+        
+        const wb = XLSX.utils.book_new();
+        for (const [sheetName, data] of Object.entries(sheets)) {
+            const ws = XLSX.utils.aoa_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        }
+        XLSX.writeFile(wb, 'System_Data_Template.xlsx');
+    }
+    
+    function openUploadModal() {
+        const fileInput = document.getElementById('systemExcelFile');
+        if (fileInput) fileInput.value = '';
+        const progressArea = document.getElementById('uploadProgressArea');
+        const sheetStatusList = document.getElementById('sheetStatusList');
+        if (progressArea) progressArea.style.display = 'none';
+        if (sheetStatusList) sheetStatusList.innerHTML = '';
+        if (uploadModal) uploadModal.show();
+    }
     
     // ==================== 其他函數 ====================
     function logout() {
@@ -1337,10 +1458,6 @@ async function exportExcel() {
             event.preventDefault();
             doLogin();
         }
-    }
-    
-    function openUploadModal() {
-        alert("上傳功能請使用系統管理員介面");
     }
     
     async function batchUpload() {
@@ -1458,16 +1575,16 @@ async function exportExcel() {
     }
     
     function downloadFEHDTemplate() {
-    const data = [
-        ["plate", "pgvw", "startDate", "expiryDate", "vehicleDailyLimit", "midnight", "district", "contactPerson", "contactTel", "contactEmail"],
-        ["AB1234", "5.5", "2024-01-01", "2025-12-31", "5", "Y", "Sham Shui Po", "Mr. Chan", "91234567", "chan@fehd.gov.hk"],
-        ["BC5678", "12", "2024-02-01", "2026-01-31", "8", "N", "Mong Kok", "Ms. Lee", "98765432", "lee@fehd.gov.hk"]
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Vehicles");
-    XLSX.writeFile(wb, "Vehicle_Upload_Template.xlsx");
-}
+        const data = [
+            ["plate", "pgvw", "startDate", "expiryDate", "vehicleDailyLimit", "midnight", "district", "contactPerson", "contactTel", "contactEmail"],
+            ["AB1234", "5.5", "2024-01-01", "2025-12-31", "5", "Y", "Sham Shui Po", "Mr. Chan", "91234567", "chan@fehd.gov.hk"],
+            ["BC5678", "12", "2024-02-01", "2026-01-31", "8", "N", "Mong Kok", "Ms. Lee", "98765432", "lee@fehd.gov.hk"]
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Vehicles");
+        XLSX.writeFile(wb, "Vehicle_Upload_Template.xlsx");
+    }
     
     // ==================== 新增車輛表單 ====================
     document.getElementById('vehicleForm')?.addEventListener('submit', async (e) => {
@@ -1580,7 +1697,7 @@ async function exportExcel() {
         }
     });
     
-    // ==================== 初始化用戶下拉選單 ====================
+    // ==================== 初始化 ====================
     async function initUserDropdown() {
         await loadUsersFromR2();
         const select = document.getElementById('userId');
@@ -1597,7 +1714,6 @@ async function exportExcel() {
         }
     }
     
-    // ==================== 設定初始角色 ====================
     let urlRole = new URLSearchParams(window.location.search).get('role');
     if (urlRole === 'weighbridge') urlRole = 'epd';
     currentRole = (urlRole === 'epd') ? 'epd' : 'fehd';
@@ -1618,6 +1734,8 @@ async function exportExcel() {
     const startDateInput = document.getElementById('startDate');
     if (startDateInput) startDateInput.value = `${yyyy}-${mm}-${dd}`;
     
+    uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
+    
     // 註冊全域函數
     window.sortTable = sortTable;
     window.filterTable = filterTable;
@@ -1633,6 +1751,8 @@ async function exportExcel() {
     window.batchUpload = batchUpload;
     window.downloadFEHDTemplate = downloadFEHDTemplate;
     window.openUploadModal = openUploadModal;
+    window.uploadSystemExcel = uploadSystemExcel;
+    window.downloadSystemTemplate = downloadSystemTemplate;
 </script>
 </body>
 </html>
