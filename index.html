@@ -567,6 +567,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    // ==================== 區域標準化對照表 ====================
     const DISTRICT_DICTIONARY = {
         "central & western": "Central & Western", "central": "Central & Western", "中西區": "Central & Western", "中西区": "Central & Western",
         "wan chai": "Wan Chai", "wanchai": "Wan Chai", "灣仔": "Wan Chai", "湾仔": "Wan Chai",
@@ -589,31 +590,34 @@
         "islands": "Islands", "離島": "Islands", "离岛": "Islands",
         "hk, kln & n.t.": "HK, KLN & NT", "hk, kln & nt": "HK, KLN & NT", "全港": "HK, KLN & NT", "香港九龍新界": "HK, KLN & NT"
     };
-
+    
     function standardizeDistrict(districtName) {
         if (!districtName) return "";
         const key = String(districtName).trim().toLowerCase().replace(/\s+/g, ' ');
         return DISTRICT_DICTIONARY[key] || districtName;
     }
     
+    // ==================== API 設定 ====================
     const API_URL = "https://vehicle-api.tdgwkts.workers.dev/exec";
     
+    // ==================== 全域變數 ====================
     let currentSession = null;
     let currentRole = "fehd";
     let vehiclesData = [];
-    let sortColumn = -1;
-    let sortDirection = 'asc';
+    let districtQuotaMap = {};      // 從 DistrictQuota.json 載入
+    let midnightQuotaMap = {};       // 從 MidnightLimit.json 載入
+    let usersMap = {};               // 從 Users.json 載入
     let currentUserViewDistricts = [];
     let currentSelectedFilterDistrict = null;
     let isMidnightTopActive = false;
-    let userOwnDistrict = null;
-    let midnightQuotaMap = {};
-    let midnightQuotaDistrictsList = [];
-    let uploadModal = null;
+    let sortColumn = -1;
+    let sortDirection = 'asc';
     let currentPage = 1;
     let rowsPerPage = 50;
     let currentFilteredDataForPaging = [];
-
+    let uploadModal = null;
+    
+    // ==================== 輔助函數 ====================
     function showLoading(show, customMsg = "驗證中，請稍候...") {
         const loader = document.getElementById('loadingOverlay');
         if (loader) {
@@ -637,7 +641,6 @@
         return await response.json();
     }
     
-    // 日期格式化函數：將任何格式轉為 YYYY-MM-DD
     function formatDateToYMD(dateValue) {
         if (!dateValue && dateValue !== 0) return "";
         if (typeof dateValue === 'number') {
@@ -646,7 +649,7 @@
             return "";
         }
         if (dateValue instanceof Date) {
-            if (!isNaN(dateValue.getTime())) return dateValue.toISOString().split('T')[0];
+            if (!isNaN(date.getTime())) return dateValue.toISOString().split('T')[0];
             return "";
         }
         if (typeof dateValue === 'string') {
@@ -656,11 +659,6 @@
             if (!isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
         }
         return "";
-    }
-    
-    function safeSplitDate(d) {
-        const f = formatDateToYMD(d);
-        return f || '-';
     }
     
     function escapeHtml(str) {
@@ -673,32 +671,99 @@
         });
     }
     
+    // ==================== 從 R2 載入各種資料 ====================
+    async function loadUsersFromR2() {
+        try {
+            const result = await callAPI('getUserList');
+            if (result.success && result.users) {
+                usersMap = {};
+                result.users.forEach(u => { usersMap[u.id] = u; });
+                console.log("✅ 載入用戶資料:", Object.keys(usersMap).length, "筆");
+                return true;
+            }
+        } catch (e) { console.error("載入用戶失敗:", e); }
+        return false;
+    }
+    
+    async function loadDistrictQuotaFromR2(forceRefresh = false) {
+        if (!forceRefresh && Object.keys(districtQuotaMap).length > 0) return true;
+        try {
+            const result = await callAPI('getDistrictQuota');
+            if (result.success && result.data && result.data.length > 0) {
+                districtQuotaMap = {};
+                result.data.forEach(item => {
+                    districtQuotaMap[standardizeDistrict(item.district)] = item.dailyLimit || 50;
+                });
+                console.log("✅ 載入區域每日上限:", districtQuotaMap);
+                return true;
+            }
+        } catch (e) { console.error("載入區域配額失敗:", e); }
+        // 預設值
+        districtQuotaMap = {
+            "Central & Western": 50, "Wan Chai": 50, "Eastern": 50, "Southern": 50,
+            "Sham Shui Po": 50, "Mong Kok": 50, "Yau Tsim": 50, "Kowloon City": 50,
+            "Wong Tai Sin": 50, "Kwun Tong": 50, "Tuen Mun": 50, "Yuen Long": 50,
+            "Sha Tin": 50, "Kwai Tsing": 50, "North": 50, "Tai Po": 50,
+            "Sai Kung": 50, "Tsuen Wan": 50, "Islands": 50, "HK, KLN & NT": 100
+        };
+        return false;
+    }
+    
+    async function loadMidnightQuotaFromR2(forceRefresh = false) {
+        if (!forceRefresh && Object.keys(midnightQuotaMap).length > 0) return true;
+        try {
+            const result = await callAPI('getMidnightQuota');
+            if (result.success && result.data && result.data.length > 0) {
+                midnightQuotaMap = {};
+                result.data.forEach(item => {
+                    midnightQuotaMap[standardizeDistrict(item.district)] = item.limit;
+                });
+                console.log("✅ 載入凌晨配額:", midnightQuotaMap);
+                return true;
+            }
+        } catch (e) { console.error("載入凌晨配額失敗:", e); }
+        // 預設值
+        midnightQuotaMap = {
+            "Sham Shui Po": 5, "Mong Kok": 8, "Yau Tsim": 4,
+            "Central & Western": 5, "Kowloon City": 2, "Wong Tai Sin": 1,
+            "Wan Chai": 2, "HK, KLN & NT": 26
+        };
+        return false;
+    }
+    
+    function getDistrictDailyLimit(district) {
+        if (!district) return 50;
+        const std = standardizeDistrict(district);
+        return districtQuotaMap[std] || 50;
+    }
+    
+    function getMidnightLimit(district) {
+        if (!district) return null;
+        const std = standardizeDistrict(district);
+        return midnightQuotaMap[std] || null;
+    }
+    
+    // ==================== 車輛顯示與過濾 ====================
     function updateContactPanel() {
         const contactBlock = document.getElementById('contactInfoBlock');
         if (contactBlock) contactBlock.style.display = 'none';
     }
     
-    function updateMidnightQuotaPanel(vehiclesList, viewDistrictsArray) {
+    function updateMidnightQuotaPanel() {
         const container = document.getElementById('midnightQuotaSummary');
         if (!container) return;
-        if (!vehiclesList || vehiclesList.length === 0) {
-            container.innerHTML = '<div class="small text-muted">尚無車輛資料</div>';
-            return;
-        }
         
         const today = new Date().toISOString().split('T')[0];
-        const activeVehicles = vehiclesList.filter(v => {
+        const activeVehicles = vehiclesData.filter(v => {
             const expiryDateStr = formatDateToYMD(v.expiryDate);
             return expiryDateStr && expiryDateStr >= today;
         });
         
         let allowedDistricts = [];
-        if (viewDistrictsArray === 'all') {
-            allowedDistricts = [...midnightQuotaDistrictsList];
-        } else if (Array.isArray(viewDistrictsArray) && viewDistrictsArray.length > 0) {
-            allowedDistricts = viewDistrictsArray.filter(district => {
-                return midnightQuotaMap[standardizeDistrict(district)] !== undefined;
-            });
+        if (currentUserViewDistricts === 'all') {
+            allowedDistricts = Object.keys(midnightQuotaMap);
+        } else if (Array.isArray(currentUserViewDistricts)) {
+            allowedDistricts = currentUserViewDistricts.filter(d => midnightQuotaMap[standardizeDistrict(d)]);
         }
         allowedDistricts = [...new Set(allowedDistricts.map(d => standardizeDistrict(d)))];
         
@@ -710,13 +775,11 @@
         let html = '<div class="row row-cols-2 row-cols-md-4 g-2">';
         for (const district of allowedDistricts) {
             const limit = midnightQuotaMap[district];
-            if (limit === null || limit === undefined) continue;
+            if (!limit) continue;
             const used = activeVehicles.filter(v => standardizeDistrict(v.district) === district && v.midnight === 'Y').length;
             const percent = (used / limit) * 100;
-            let barColor = used >= limit ? 'bg-danger' : (used >= limit * 0.8 ? 'bg-warning' : 'bg-success');
             const isActive = (currentSelectedFilterDistrict === district);
             const isOverLimit = used > limit;
-            const excess = used - limit;
             
             html += `<div class="col">
                 <div class="card p-2 border-0 shadow-sm quota-card ${isActive ? 'active' : ''}" 
@@ -725,9 +788,8 @@
                     <div class="fw-bold">${escapeHtml(district)}${isOverLimit ? ' ⚠️ 超標' : ''}</div>
                     <div>🌙 凌晨配額: <span class="${isOverLimit ? 'text-danger fw-bold' : ''}">${used}</span> / ${limit}</div>
                     <div class="progress mt-1" style="height: 6px;">
-                        <div class="progress-bar ${isOverLimit ? 'bg-danger' : barColor}" style="width: ${Math.min(100, percent)}%"></div>
+                        <div class="progress-bar ${isOverLimit ? 'bg-danger' : (used >= limit * 0.8 ? 'bg-warning' : 'bg-success')}" style="width: ${Math.min(100, percent)}%"></div>
                     </div>
-                    ${isOverLimit ? `<div class="small text-danger mt-1">⚠️ 超出 ${excess} 輛，請先刪除</div>` : ''}
                 </div>
             </div>`;
         }
@@ -735,21 +797,14 @@
         container.innerHTML = html;
         
         document.querySelectorAll('.quota-card').forEach(card => {
-            card.addEventListener('click', (e) => {
+            card.addEventListener('click', () => {
                 const district = card.getAttribute('data-district');
                 if (district) {
-                    if (currentSelectedFilterDistrict === district) {
-                        currentSelectedFilterDistrict = null;
-                        const searchInput = document.getElementById('searchInput');
-                        if (searchInput) searchInput.value = '';
-                    } else {
-                        currentSelectedFilterDistrict = district;
-                        const searchInput = document.getElementById('searchInput');
-                        if (searchInput) searchInput.value = district;
-                    }
+                    currentSelectedFilterDistrict = (currentSelectedFilterDistrict === district) ? null : district;
+                    const searchInput = document.getElementById('searchInput');
+                    if (searchInput) searchInput.value = currentSelectedFilterDistrict || '';
                     filterTable();
-                    updateMidnightQuotaPanel(vehiclesData, currentUserViewDistricts);
-                    updateContactPanel();
+                    updateMidnightQuotaPanel();
                 }
             });
         });
@@ -765,15 +820,15 @@
         }
         container.style.display = 'flex';
         let btnHtml = `<span class="pagination-info">共 ${totalItems} 筆</span>`;
-        btnHtml += `<button class="pagination-btn" onclick="goToPage(1)" ${page === 1 ? 'disabled style="opacity:0.5;"' : ''}>⏮ 首頁</button>`;
-        btnHtml += `<button class="pagination-btn" onclick="goToPage(${page-1})" ${page === 1 ? 'disabled style="opacity:0.5;"' : ''}>◀ 上一頁</button>`;
+        btnHtml += `<button class="pagination-btn" onclick="goToPage(1)" ${page === 1 ? 'disabled style="opacity:0.5;"' : ''}>⏮</button>`;
+        btnHtml += `<button class="pagination-btn" onclick="goToPage(${page-1})" ${page === 1 ? 'disabled style="opacity:0.5;"' : ''}>◀</button>`;
         let startPage = Math.max(1, page - 2);
         let endPage = Math.min(totalPages, page + 2);
         for (let i = startPage; i <= endPage; i++) {
             btnHtml += `<button class="pagination-btn ${i === page ? 'active-page' : ''}" onclick="goToPage(${i})">${i}</button>`;
         }
-        btnHtml += `<button class="pagination-btn" onclick="goToPage(${page+1})" ${page === totalPages ? 'disabled style="opacity:0.5;"' : ''}>下一頁 ▶</button>`;
-        btnHtml += `<button class="pagination-btn" onclick="goToPage(${totalPages})" ${page === totalPages ? 'disabled style="opacity:0.5;"' : ''}>末頁 ⏭</button>`;
+        btnHtml += `<button class="pagination-btn" onclick="goToPage(${page+1})" ${page === totalPages ? 'disabled style="opacity:0.5;"' : ''}>▶</button>`;
+        btnHtml += `<button class="pagination-btn" onclick="goToPage(${totalPages})" ${page === totalPages ? 'disabled style="opacity:0.5;"' : ''}>⏭</button>`;
         container.innerHTML = btnHtml;
     }
     
@@ -798,33 +853,22 @@
         
         if (tbody) {
             tbody.innerHTML = pageData.map(v => {
-                const plate = v.plate || '';
-                const pgvw = v.pgvw !== undefined && v.pgvw !== null ? v.pgvw : '';
-                const startDate = safeSplitDate(v.startDate);
-                const expiry = safeSplitDate(v.expiryDate);
-                const vehicleDailyLimit = v.vehicleDailyLimit || 5;
-                const midnight = v.midnight === 'Y' ? '✅ 是' : '❌ 否';
-                const district = v.district || '';
-                const districtDailyLimit = v.districtDailyLimit || 0;
-                const createdBy = v.createdBy || '-';
-                const contactPerson = v.contactPerson || '-';
-                const contactTel = v.contactTel !== undefined && v.contactTel !== null ? v.contactTel : '-';
-                const contactEmail = v.contactEmail || '-';
-                
-                return `<table>
-                    <td><strong>${escapeHtml(plate)}</strong></td>
-                    <td>${pgvw}</td>
-                    <td>${startDate}</td>
-                    <td>${expiry}</td>
-                    <td>${vehicleDailyLimit}</td>
-                    <td>${midnight}</td>
-                    <td>${escapeHtml(district)}</td>
+                const midnightDisplay = v.midnight === 'Y' ? '✅ 是' : '❌ 否';
+                const districtDailyLimit = v.districtDailyLimit || getDistrictDailyLimit(v.district);
+                return `<tr>
+                    <td><strong>${escapeHtml(v.plate || '')}</strong></td>
+                    <td>${v.pgvw || ''}</td>
+                    <td>${formatDateToYMD(v.startDate)}</td>
+                    <td>${formatDateToYMD(v.expiryDate)}</td>
+                    <td>${v.vehicleDailyLimit || 5}</td>
+                    <td>${midnightDisplay}</td>
+                    <td>${escapeHtml(v.district || '')}</td>
                     <td>${districtDailyLimit}</td>
-                    <td>${escapeHtml(createdBy)}</td>
-                    <td>${escapeHtml(contactPerson)}</td>
-                    <td>${escapeHtml(String(contactTel))}</td>
-                    <td>${escapeHtml(contactEmail)}</td>
-                    <td>${currentRole === 'fehd' ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle('${escapeHtml(plate).replace(/'/g, "\\'")}')">刪除</button>` : '🔍 唯讀'}</td>
+                    <td>${escapeHtml(v.createdBy || '-')}</td>
+                    <td>${escapeHtml(v.contactPerson || '-')}</td>
+                    <td>${v.contactTel || '-'}</td>
+                    <td>${escapeHtml(v.contactEmail || '-')}</td>
+                    <td>${currentRole === 'fehd' ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle('${escapeHtml(v.plate).replace(/'/g, "\\'")}')">刪除</button>` : '🔍 唯讀'}</td>
                 </tr>`;
             }).join('');
         }
@@ -845,6 +889,10 @@
                     standardizeDistrict(userDistrict) === stdVehicleDistrict
                 );
             });
+        }
+        
+        if (currentSelectedFilterDistrict) {
+            filteredData = filteredData.filter(v => standardizeDistrict(v.district) === currentSelectedFilterDistrict);
         }
         
         if (searchTerm) {
@@ -877,12 +925,6 @@
                     case 5: valA = (a.midnight === 'Y') ? 1 : 0; valB = (b.midnight === 'Y') ? 1 : 0; break; 
                     case 6: valA = a.district || ''; valB = b.district || ''; break; 
                     case 7: valA = Number(a.districtDailyLimit) || 0; valB = Number(b.districtDailyLimit) || 0; break; 
-                    case 8: valA = a.createdBy || ''; valB = b.createdBy || ''; break;
-                    case 9: valA = a.contactPerson || ''; valB = b.contactPerson || ''; break;
-                    case 10: valA = (a.contactTel !== undefined && a.contactTel !== null) ? a.contactTel.toString() : '';
-                             valB = (b.contactTel !== undefined && b.contactTel !== null) ? b.contactTel.toString() : '';
-                             break;
-                    case 11: valA = a.contactEmail || ''; valB = b.contactEmail || ''; break;
                     default: valA = ''; valB = '';
                 }
                 if (sortColumn === 1 || sortColumn === 4 || sortColumn === 7 || sortColumn === 5) {
@@ -902,41 +944,6 @@
         updateContactPanel();
     }
     
-    async function loadVehicles(forceRefresh = false) {
-        if (!currentSession) return;
-        const cacheKey = 'vehicles_cache_' + currentSession.userId;
-        const cached = localStorage.getItem(cacheKey);
-        
-        if (!forceRefresh && cached) {
-            try {
-                vehiclesData = JSON.parse(cached);
-                filterTable();
-                updateMidnightQuotaPanel(vehiclesData, currentUserViewDistricts);
-                updateContactPanel();
-            } catch(e) {}
-        }
-        
-        try {
-            const result = await callAPI('getVehicles');
-            if (result.success && result.data) {
-                vehiclesData = result.data;
-                localStorage.setItem(cacheKey, JSON.stringify(vehiclesData));
-                filterTable();
-                updateMidnightQuotaPanel(vehiclesData, currentUserViewDistricts);
-                updateContactPanel();
-            } else if (!cached) {
-                const tbody = document.getElementById('vehicleList');
-                if (tbody) tbody.innerHTML = '<tr><td colspan="13" class="text-center text-danger">無法載入資料</td></tr>';
-            }
-        } catch(err) {
-            console.error("網路錯誤:", err);
-            if (!cached) {
-                const tbody = document.getElementById('vehicleList');
-                if (tbody) tbody.innerHTML = '<tr><td colspan="13" class="text-center text-danger">網路錯誤，請稍後再試</td></tr>';
-            }
-        }
-    }
-    
     function sortTable(columnIndex) {
         if (sortColumn === columnIndex) {
             sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
@@ -949,7 +956,6 @@
             const btn = document.getElementById('midnightTopBtn');
             if (btn) {
                 btn.innerHTML = `<i class="fas fa-moon me-1"></i> 凌晨車輛置頂`;
-                btn.style.backgroundColor = "#2b7340";
             }
         }
         filterTable();
@@ -960,158 +966,38 @@
         const btn = document.getElementById('midnightTopBtn');
         if (isMidnightTopActive) {
             btn.innerHTML = `<i class="fas fa-sun me-1"></i> 取消置頂`;
-            btn.style.backgroundColor = "#e67e22";
             sortColumn = -1;
         } else {
             btn.innerHTML = `<i class="fas fa-moon me-1"></i> 凌晨車輛置頂`;
-            btn.style.backgroundColor = "#2b7340";
         }
         filterTable();
     }
     
-    // ==================== 修復後的匯出 Excel 函數 ====================
-    async function exportExcel() {
-        if (!currentSession) {
-            alert("請先登入系統。");
-            return;
-        }
-        showLoading(true, "📎 準備匯出報表...");
+    async function loadVehicles(forceRefresh = false) {
+        if (!currentSession) return;
         try {
-            const role = currentSession.role;
-            const todayStr = new Date().toISOString().split('T')[0];
-            const wb = XLSX.utils.book_new();
-            
-            if (role === '超級管理員') {
-                console.log("Admin 權限：導出完整 6 個工作表");
-                const [vehicles, users, expired, districtQuota, midnightQuota, emailList] = await Promise.all([
-                    callAPI('getVehicles').then(r => r.data || []),
-                    callAPI('getUserList').then(r => r.users || []),
-                    callAPI('getExpired').then(r => r.data || []),
-                    callAPI('getDistrictQuota').then(r => r.data || []),
-                    callAPI('getMidnightQuota').then(r => r.data || []),
-                    callAPI('getEmailList').then(r => r.data || [])
-                ]);
-                
-                // 車輛資料 - 使用與上傳模板一致的欄位順序
-                const vehiclesSheetData = [["車牌號碼", "PGVW", "開始日期", "有效日期", "車輛每日上限", "凌晨授權", "所屬區域", "區域每日上限", "建立者", "聯絡人", "電話", "電子郵件"]];
-                vehicles.forEach(v => {
-                    vehiclesSheetData.push([
-                        v.plate || "",
-                        v.pgvw || "",
-                        formatDateToYMD(v.startDate),
-                        formatDateToYMD(v.expiryDate),
-                        v.vehicleDailyLimit || 5,
-                        v.midnight === 'Y' ? "Y" : "N",
-                        v.district || "",
-                        v.districtDailyLimit || 0,
-                        v.createdBy || "",
-                        v.contactPerson || "",
-                        v.contactTel !== undefined && v.contactTel !== null ? v.contactTel : "",
-                        v.contactEmail || ""
-                    ]);
-                });
-                const wsVehicles = XLSX.utils.aoa_to_sheet(vehiclesSheetData);
-                XLSX.utils.book_append_sheet(wb, wsVehicles, "Vehicles");
-                
-                // 用戶資料
-                const usersSheetData = [["用戶ID", "密碼(雜湊)", "角色", "所屬區域", "可查看區域"]];
-                users.forEach(u => {
-                    usersSheetData.push([
-                        u.id || "",
-                        u.password || "",
-                        u.role || "",
-                        u.district || "",
-                        u.viewDistricts || ""
-                    ]);
-                });
-                const wsUsers = XLSX.utils.aoa_to_sheet(usersSheetData);
-                XLSX.utils.book_append_sheet(wb, wsUsers, "Users");
-                
-                // 過期記錄
-                const expiredSheetData = [["車牌號碼", "PGVW", "開始日期", "有效日期", "每日上限", "凌晨授權", "所屬區域"]];
-                expired.forEach(e => {
-                    expiredSheetData.push([
-                        e.plate || "",
-                        e.pgvw || "",
-                        formatDateToYMD(e.startDate),
-                        formatDateToYMD(e.expiryDate),
-                        e.vehicleDailyLimit || 5,
-                        e.midnight === 'Y' ? "Y" : "N",
-                        e.district || ""
-                    ]);
-                });
-                const wsExpired = XLSX.utils.aoa_to_sheet(expiredSheetData);
-                XLSX.utils.book_append_sheet(wb, wsExpired, "Expired");
-                
-                // 區域每日上限
-                const districtSheetData = [["區域", "每日上限"]];
-                districtQuota.forEach(dq => {
-                    districtSheetData.push([dq.district || "", dq.dailyLimit || ""]);
-                });
-                const wsDistrict = XLSX.utils.aoa_to_sheet(districtSheetData);
-                XLSX.utils.book_append_sheet(wb, wsDistrict, "DistrictQuota");
-                
-                // 凌晨配額
-                const midnightSheetData = [["區域", "凌晨上限"]];
-                midnightQuota.forEach(mq => {
-                    midnightSheetData.push([mq.district || "", mq.limit || ""]);
-                });
-                const wsMidnight = XLSX.utils.aoa_to_sheet(midnightSheetData);
-                XLSX.utils.book_append_sheet(wb, wsMidnight, "MidnightLimit");
-                
-                // 郵件列表
-                const emailSheetData = [["Email", "備註"]];
-                emailList.forEach(el => {
-                    emailSheetData.push([el.email || "", el.remark || ""]);
-                });
-                const wsEmail = XLSX.utils.aoa_to_sheet(emailSheetData);
-                XLSX.utils.book_append_sheet(wb, wsEmail, "Email");
-                
-                XLSX.writeFile(wb, `FEHD_System_MasterBackup_${todayStr}.xlsx`);
-                alert(`✅ 完整系統備份匯出成功！\n- 車輛: ${vehicles.length} 筆\n- 用戶: ${users.length} 筆`);
-            } else {
-                console.log("一般用戶：導出車輛列表");
-                const res = await callAPI('getVehicles');
-                let myVehicles = res.data || [];
-                
-                // 使用與上傳模板一致的欄位順序
-                const vehiclesSheetData = [["車牌號碼", "PGVW", "開始日期", "有效日期", "車輛每日上限", "凌晨授權", "所屬區域", "區域每日上限", "建立者", "聯絡人", "電話", "電子郵件"]];
-                myVehicles.forEach(v => {
-                    vehiclesSheetData.push([
-                        v.plate || "",
-                        v.pgvw || "",
-                        formatDateToYMD(v.startDate),
-                        formatDateToYMD(v.expiryDate),
-                        v.vehicleDailyLimit || 5,
-                        v.midnight === 'Y' ? "Y" : "N",
-                        v.district || "",
-                        v.districtDailyLimit || 0,
-                        v.createdBy || "",
-                        v.contactPerson || "",
-                        v.contactTel !== undefined && v.contactTel !== null ? v.contactTel : "",
-                        v.contactEmail || ""
-                    ]);
-                });
-                const ws = XLSX.utils.aoa_to_sheet(vehiclesSheetData);
-                XLSX.utils.book_append_sheet(wb, ws, "Vehicles");
-                XLSX.writeFile(wb, `FEHD_VehicleList_${currentSession.userId}_${todayStr}.xlsx`);
-                alert(`✅ 匯出 ${myVehicles.length} 筆車輛資料`);
+            const result = await callAPI('getVehicles');
+            if (result.success && result.data) {
+                vehiclesData = result.data.map(v => ({
+                    ...v,
+                    districtDailyLimit: getDistrictDailyLimit(v.district)
+                }));
+                filterTable();
+                updateMidnightQuotaPanel();
+                updateContactPanel();
             }
-        } catch (err) {
-            alert("🚨 導出 Excel 時發生錯誤: " + err.message);
-            console.error(err);
-        } finally {
-            showLoading(false);
+        } catch(err) {
+            console.error("載入車輛錯誤:", err);
         }
     }
     
-    // ==================== 新增車輛功能 (完整實作) ====================
+    // ==================== 凌晨配額檢查 ====================
     function checkMidnightQuotaViolation(district, setMidnightY, excludePlate, allVehicles) {
         if (setMidnightY !== 'Y') return { allowed: true };
         
         const stdDistrict = standardizeDistrict(district);
-        const limit = midnightQuotaMap[stdDistrict];
-        if (limit === undefined) {
+        const limit = getMidnightLimit(stdDistrict);
+        if (limit === null) {
             return { allowed: false, message: `❌ 區域「${district}」不在凌晨配額管制範圍內` };
         }
         
@@ -1134,14 +1020,34 @@
         return { allowed: true };
     }
     
+    // ==================== 新增車輛 ====================
+    async function addVehicle(formData) {
+        showLoading(true, "🚗 新增車輛中...");
+        try {
+            const result = await callAPI('addVehicle', { data: formData });
+            if (result.success) {
+                alert(result.msg);
+                await loadVehicles(true);
+                return true;
+            } else {
+                alert("操作失敗：" + result.msg);
+                return false;
+            }
+        } catch(err) {
+            alert("網路錯誤：" + err);
+            return false;
+        } finally {
+            showLoading(false);
+        }
+    }
+    
     async function deleteVehicle(plate) {
         if (!confirm(`確定要刪除車輛 ${plate} 嗎？`)) return;
-        showLoading(true);
+        showLoading(true, "刪除中...");
         try {
             const result = await callAPI('deleteVehicle', { plate });
             if (result.success) {
                 alert(result.msg);
-                localStorage.removeItem('vehicles_cache_' + currentSession.userId);
                 await loadVehicles(true);
             } else {
                 alert("刪除失敗：" + result.msg);
@@ -1153,14 +1059,7 @@
         }
     }
     
-    function renderUserDropdown(users) {
-        const select = document.getElementById('userId');
-        if (!select) return;
-        select.innerHTML = '<option value="">-- 請選擇用戶 --</option>';
-        const filteredUsers = users.filter(u => currentRole === 'fehd' ? (u.role === '區域主管' || u.role === '超級管理員') : (u.role === '轉運站職員' || u.role === '超級管理員'));
-        filteredUsers.forEach(u => { select.innerHTML += `<option value="${u.id}">${u.id}</option>`; });
-    }
-    
+    // ==================== 登入功能 ====================
     async function doLogin() {
         const userId = document.getElementById('userId').value;
         const password = document.getElementById('password').value;
@@ -1170,9 +1069,21 @@
             return;
         }
         
-        showLoading(true, "🔐 驗證中，轉動齒輪...");
+        showLoading(true, "🔐 驗證中...");
         
         try {
+            // 先載入用戶資料
+            await loadUsersFromR2();
+            
+            // 驗證用戶是否存在
+            const user = usersMap[userId];
+            if (!user) {
+                alert("用戶不存在");
+                showLoading(false);
+                return;
+            }
+            
+            // 呼叫後端 API 驗證密碼
             const result = await callAPI('login', { userId, password });
             
             if (!result.success) {
@@ -1183,72 +1094,101 @@
             
             currentSession = result.session;
             
-            if (result.session.role === '超級管理員') {
-                result.session.viewDistricts = "all";
-            }
+            // 載入配額資料
+            await Promise.all([
+                loadDistrictQuotaFromR2(true),
+                loadMidnightQuotaFromR2(true)
+            ]);
             
-            if (result.session.district && result.session.district !== 'WKTS') {
-                userOwnDistrict = result.session.district;
+            // 設定權限
+            if (user.viewDistricts === 'all' || user.role === '超級管理員') {
+                currentUserViewDistricts = 'all';
+            } else if (user.viewDistricts) {
+                currentUserViewDistricts = user.viewDistricts.split(',').map(s => standardizeDistrict(s.trim()));
+            } else if (user.district) {
+                currentUserViewDistricts = [standardizeDistrict(user.district)];
             } else {
-                userOwnDistrict = null;
+                currentUserViewDistricts = [];
             }
             
+            // 設定角色
+            if (userId === 'WKTS' || user.role === '超級管理員') {
+                currentRole = 'fehd';
+            } else if (user.role === '轉運站職員') {
+                currentRole = 'epd';
+            } else {
+                currentRole = 'fehd';
+            }
+            
+            // 載入車輛
             if (result.initialVehicles && result.initialVehicles.length > 0) {
-                vehiclesData = result.initialVehicles;
-                localStorage.setItem('vehicles_cache_' + currentSession.userId, JSON.stringify(vehiclesData));
+                vehiclesData = result.initialVehicles.map(v => ({
+                    ...v,
+                    districtDailyLimit: getDistrictDailyLimit(v.district)
+                }));
             } else {
                 vehiclesData = [];
             }
             
-            await loadMidnightQuotaFromR2(true);
-            
+            // 更新 UI
             document.getElementById('loginPage').style.display = 'none';
             document.getElementById('mainPage').style.display = 'block';
             
-            let roleClass = currentRole === 'fehd' ? 'role-fehd' : 'role-weighbridge';
-            let roleName = currentRole === 'fehd' ? '食環署' : '環保署';
+            const roleClass = currentRole === 'fehd' ? 'role-fehd' : 'role-weighbridge';
+            const roleName = currentRole === 'fehd' ? '食環署' : '環保署';
             document.getElementById('userInfo').innerHTML = `
-                <span class="d-block mb-1">👤 ${result.session.userId}</span>
-                <span class="role-tag ${roleClass} d-inline-block mt-1" style="margin-left: 0; padding: 4px 14px; font-size: 0.75rem;">${roleName}</span>
+                <span class="d-block mb-1">👤 ${userId}</span>
+                <span class="role-tag ${roleClass} d-inline-block mt-1">${roleName}</span>
             `;
             
-            if (result.session.viewDistricts === "all") {
-                currentUserViewDistricts = "all";
-                document.getElementById('viewHint').innerHTML = `🔍 您可查看的區域：<br><strong>所有區域 (超級管理員)</strong>`;
-            } else {
-                currentUserViewDistricts = result.session.viewDistricts || [];
-                const viewText = currentUserViewDistricts.join("、");
-                document.getElementById('viewHint').innerHTML = `🔍 您可查看的區域：<br><strong>${viewText}</strong>`;
-            }
+            const viewText = currentUserViewDistricts === 'all' ? '所有區域' : currentUserViewDistricts.join('、');
+            document.getElementById('viewHint').innerHTML = `🔍 您可查看的區域：<br><strong>${viewText}</strong>`;
             
             const uploadBtn = document.getElementById('uploadToR2Btn');
-            if (result.session.userId === 'WKTS' || result.session.role === '超級管理員') {
-                uploadBtn.style.display = 'block';
-            } else {
-                uploadBtn.style.display = 'none';
+            if (uploadBtn) {
+                uploadBtn.style.display = (userId === 'WKTS' || user.role === '超級管理員') ? 'block' : 'none';
             }
             
+            // 設定區域下拉選單
             if (currentRole === 'fehd') {
                 const districtSelect = document.getElementById('district');
                 if (districtSelect) {
                     districtSelect.innerHTML = '<option value="">請選擇</option>';
-                    if (userOwnDistrict) {
-                        districtSelect.innerHTML += `<option value="${userOwnDistrict}">${userOwnDistrict}</option>`;
-                    } else if (currentUserViewDistricts === 'all') {
-                        midnightQuotaDistrictsList.forEach(d => { 
-                            districtSelect.innerHTML += `<option value="${d}">${d}</option>`; 
-                        });
-                    } else if (Array.isArray(currentUserViewDistricts) && currentUserViewDistricts.length > 0) {
-                        currentUserViewDistricts.forEach(d => {
-                            districtSelect.innerHTML += `<option value="${d}">${d}</option>`;
-                        });
+                    let districts = [];
+                    if (currentUserViewDistricts === 'all') {
+                        districts = Object.keys(districtQuotaMap);
+                    } else if (Array.isArray(currentUserViewDistricts)) {
+                        districts = currentUserViewDistricts;
                     }
+                    districts.forEach(d => {
+                        districtSelect.innerHTML += `<option value="${d}">${d}</option>`;
+                    });
                     districtSelect.disabled = false;
+                    
+                    // 監聽區域選擇變更
+                    districtSelect.onchange = function() {
+                        const selected = this.value;
+                        if (selected) {
+                            document.getElementById('districtDailyLimit').value = getDistrictDailyLimit(selected);
+                        }
+                    };
                 }
             }
             
+            // 顯示/隱藏表單
+            const formSection = document.getElementById('vehicleFormSection');
+            const batchSection = document.getElementById('batchSection');
+            if (formSection) formSection.style.display = currentRole === 'fehd' ? 'block' : 'none';
+            if (batchSection) batchSection.style.display = currentRole === 'fehd' ? 'block' : 'none';
+            
+            // 設定開始日期預設值
+            const today = new Date();
+            const yyyy = today.getFullYear(), mm = String(today.getMonth() + 1).padStart(2, '0'), dd = String(today.getDate()).padStart(2, '0');
+            const startDateInput = document.getElementById('startDate');
+            if (startDateInput) startDateInput.value = `${yyyy}-${mm}-${dd}`;
+            
             filterTable();
-            updateMidnightQuotaPanel(vehiclesData, currentUserViewDistricts);
+            updateMidnightQuotaPanel();
             updateContactPanel();
             loadVehicles(true);
             
@@ -1260,35 +1200,52 @@
         }
     }
     
-    async function loadMidnightQuotaFromR2(forceRefresh = false) {
-        if (!forceRefresh && midnightQuotaDistrictsList.length > 0) return true;
+    // ==================== 匯出 Excel ====================
+    async function exportExcel() {
+        if (!currentSession) {
+            alert("請先登入系統。");
+            return;
+        }
+        showLoading(true, "📎 準備匯出報表...");
         try {
-            const result = await callAPI('getMidnightQuota');
-            if (result.success && result.data && result.data.length > 0) {
-                const quotaData = {};
-                result.data.forEach(item => { quotaData[item.district] = item.limit; });
-                midnightQuotaMap = quotaData;
-                midnightQuotaDistrictsList = Object.keys(quotaData);
-                return true;
-            } else {
-                useDefaultQuota();
-                return false;
-            }
-        } catch (error) {
-            useDefaultQuota();
-            return false;
+            const role = currentSession.role;
+            const todayStr = new Date().toISOString().split('T')[0];
+            const wb = XLSX.utils.book_new();
+            
+            // 使用與上傳模板一致的欄位順序
+            const sheetData = [["車牌號碼", "PGVW", "開始日期", "有效日期", "車輛每日上限", "凌晨授權", "所屬區域", "區域每日上限", "建立者", "聯絡人", "電話", "電子郵件"]];
+            
+            const exportData = currentFilteredDataForPaging.length > 0 ? currentFilteredDataForPaging : vehiclesData;
+            exportData.forEach(v => {
+                sheetData.push([
+                    v.plate || "",
+                    v.pgvw || "",
+                    formatDateToYMD(v.startDate),
+                    formatDateToYMD(v.expiryDate),
+                    v.vehicleDailyLimit || 5,
+                    v.midnight === 'Y' ? "Y" : "N",
+                    v.district || "",
+                    v.districtDailyLimit || getDistrictDailyLimit(v.district),
+                    v.createdBy || "",
+                    v.contactPerson || "",
+                    v.contactTel !== undefined && v.contactTel !== null ? v.contactTel : "",
+                    v.contactEmail || ""
+                ]);
+            });
+            
+            const ws = XLSX.utils.aoa_to_sheet(sheetData);
+            XLSX.utils.book_append_sheet(wb, ws, "Vehicles");
+            XLSX.writeFile(wb, `車輛清單_${todayStr}.xlsx`);
+            alert(`✅ 匯出 ${exportData.length} 筆車輛資料`);
+        } catch (err) {
+            alert("匯出失敗：" + err.message);
+            console.error(err);
+        } finally {
+            showLoading(false);
         }
     }
     
-    function useDefaultQuota() {
-        midnightQuotaMap = {
-            "Sham Shui Po": 5, "Mong Kok": 8, "Yau Tsim": 4,
-            "Central & Western": 5, "Kowloon City": 2, "Wong Tai Sin": 1,
-            "Wan Chai": 2, "HK, KLN & NT": 26
-        };
-        midnightQuotaDistrictsList = Object.keys(midnightQuotaMap);
-    }
-    
+    // ==================== 其他函數 ====================
     function logout() {
         if (currentSession) localStorage.removeItem('vehicles_cache_' + currentSession.userId);
         currentSession = null;
@@ -1309,302 +1266,11 @@
         }
     }
     
-    async function batchUpload() {
-        if (!currentSession || currentRole !== 'fehd') { alert("權限不足"); return; }
-        if (typeof XLSX === 'undefined') { alert("Excel 處理庫尚未載入"); return; }
-        const file = document.getElementById('excelFile').files[0];
-        if (!file) { alert("請選擇 Excel 檔案"); return; }
-        showLoading(true);
-        const reader = new FileReader();
-        reader.onload = async function(e) {
-            try {
-                const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-                const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-                let dataList = [];
-                for (let i = 1; i < rows.length; i++) {
-                    let row = rows[i]; if (!row[0]) continue;
-                    let rawDistrict = row[6] ? String(row[6]).trim() : "";
-                    let district = standardizeDistrict(rawDistrict);
-                    let midnightFlag = String(row[5] || 'N').toUpperCase() === 'Y' ? 'Y' : 'N';
-                    dataList.push({
-                        plate: String(row[0]).trim().toUpperCase(),
-                        pgvw: parseFloat(row[1]) || 0,
-                        startDate: formatExcelDate(row[2]),
-                        expiryDate: formatExcelDate(row[3]),
-                        vehicleDailyLimit: parseInt(row[4]) || 5,
-                        midnight: midnightFlag,
-                        district,
-                        contactPerson: row[7] ? String(row[7]).trim() : "",
-                        contactTel: row[8] ? String(row[8]).trim() : "",
-                        contactEmail: row[9] ? String(row[9]).trim() : ""
-                    });
-                }
-                
-                const uniqueMap = new Map();
-                for (const item of dataList) {
-                    const key = `${item.plate}|${item.district}`;
-                    const existing = uniqueMap.get(key);
-                    if (!existing) {
-                        uniqueMap.set(key, item);
-                    } else {
-                        const existingExpiry = new Date(existing.expiryDate);
-                        const newExpiry = new Date(item.expiryDate);
-                        if (newExpiry > existingExpiry) {
-                            uniqueMap.set(key, item);
-                        }
-                    }
-                }
-                const mergedDataList = Array.from(uniqueMap.values());
-                
-                let validData = mergedDataList.filter(d => d.plate && d.pgvw > 0 && d.expiryDate && d.district);
-                if (!validData.length) { alert("沒有有效的車輛資料"); showLoading(false); return; }
-                
-                let finalData = [];
-                for (const newItem of validData) {
-                    const existingIndex = vehiclesData.findIndex(v => 
-                        v.plate === newItem.plate && standardizeDistrict(v.district) === newItem.district
-                    );
-                    if (existingIndex !== -1) {
-                        const existing = vehiclesData[existingIndex];
-                        const existingExpiry = new Date(existing.expiryDate);
-                        const newExpiry = new Date(newItem.expiryDate);
-                        if (newExpiry <= existingExpiry) continue;
-                    }
-                    finalData.push(newItem);
-                }
-                
-                if (finalData.length === 0) { alert("沒有新增的車輛資料"); showLoading(false); return; }
-                
-                let quotaErrors = [];
-                let tempCheckVehicles = [...vehiclesData];
-                for (let item of finalData) {
-                    const violation = checkMidnightQuotaViolation(item.district, item.midnight, null, tempCheckVehicles);
-                    if (!violation.allowed) {
-                        quotaErrors.push(`${item.plate}: ${violation.message}`);
-                    } else {
-                        tempCheckVehicles.push(item);
-                    }
-                }
-                if (quotaErrors.length > 0) alert("配額衝突:\n" + quotaErrors.join("\n"));
-                finalData = finalData.filter((_, idx) => !quotaErrors.some(e => e.includes(finalData[idx].plate)));
-                if (!finalData.length) { alert("沒有有效的車輛資料或配額已滿"); showLoading(false); return; }
-                
-                const result = await callAPI('batchUpload', { dataList: finalData });
-                if (result.success) {
-                    localStorage.removeItem('vehicles_cache_' + currentSession.userId);
-                    const resultDiv = document.getElementById('batchResult');
-                    if (resultDiv) {
-                        resultDiv.innerHTML = `<div>✅ ${result.msg}</div>`;
-                        resultDiv.style.display = 'block';
-                    }
-                    await loadVehicles(true);
-                    setTimeout(() => { if (resultDiv) resultDiv.style.display = 'none'; }, 4000);
-                } else {
-                    alert("上傳失敗：" + result.msg);
-                }
-            } catch(err) {
-                alert("解析檔案失敗：" + err.message);
-            } finally {
-                showLoading(false);
-                document.getElementById('excelFile').value = "";
-            }
-        };
-        reader.readAsArrayBuffer(file);
-    }
-    
-    function formatExcelDate(val) {
-        if (!val) return "";
-        if (val instanceof Date) return val.toISOString().split('T')[0];
-        if (typeof val === 'number') {
-            const date = new Date((val - 25569) * 86400 * 1000);
-            return date.toISOString().split('T')[0];
-        }
-        let str = String(val).trim();
-        if (str.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-            let parts = str.split('/');
-            return `${parts[2]}-${parts[1]}-${parts[0]}`;
-        }
-        if (str.match(/^\d{4}-\d{2}-\d{2}$/)) return str;
-        let d = new Date(str);
-        return isNaN(d.getTime()) ? "" : d.toISOString().split('T')[0];
-    }
-    
-    function downloadFEHDTemplate() {
-        const data = [
-            ["車牌號碼", "PGVW", "開始日期", "有效日期", "車輛每日上限", "凌晨授權", "所屬區域", "聯絡人", "電話", "電郵"],
-            ["AB1234", "5.5", "2024-01-01", "2025-12-31", "5", "Y", "Sham Shui Po", "陳先生", "91234567", "chan@fehd.gov.hk"],
-            ["BC5678", "12", "2024-02-01", "2026-01-31", "8", "N", "Mong Kok", "李小姐", "98765432", "lee@fehd.gov.hk"]
-        ];
-        const ws = XLSX.utils.aoa_to_sheet(data);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "車輛批次上傳範例");
-        XLSX.writeFile(wb, "車輛批次上傳範例.xlsx");
-    }
-    
     function openUploadModal() {
-        const fileInput = document.getElementById('systemExcelFile');
-        if (fileInput) fileInput.value = '';
-        const progressArea = document.getElementById('uploadProgressArea');
-        const sheetStatusList = document.getElementById('sheetStatusList');
-        if (progressArea) progressArea.style.display = 'none';
-        if (sheetStatusList) sheetStatusList.innerHTML = '';
-        if (uploadModal) uploadModal.show();
+        alert("上傳功能請使用系統管理員介面");
     }
     
-    async function uploadSystemExcel() {
-        const fileInput = document.getElementById('systemExcelFile');
-        const file = fileInput.files[0];
-        if (!file) { alert("請選擇 Excel 檔案"); return; }
-        
-        const progressArea = document.getElementById('uploadProgressArea');
-        const sheetStatusList = document.getElementById('sheetStatusList');
-        const progressBar = document.getElementById('uploadProgressBar');
-        
-        progressArea.style.display = 'block';
-        sheetStatusList.innerHTML = '';
-        progressBar.style.width = '0%';
-        
-        try {
-            const data = await file.arrayBuffer();
-            const workbook = XLSX.read(data, { type: 'array' });
-            
-            const sheetMapping = {
-                'Users': 'users.json',
-                'Vehicles': 'vehicles.json',
-                'Expired': 'expired.json',
-                'DistrictQuota': 'districtQuota.json',
-                'MidnightLimit': 'midnightQuota.json',
-                'Email': 'emailList.json'
-            };
-            
-            const sheetNames = workbook.SheetNames;
-            const sheetsToUpload = Object.keys(sheetMapping);
-            const missingSheets = sheetsToUpload.filter(s => !sheetNames.includes(s));
-            
-            if (missingSheets.length > 0) {
-                sheetStatusList.innerHTML = `<div class="alert alert-danger">缺少工作表: ${missingSheets.join(', ')}</div>`;
-                alert(`缺少工作表: ${missingSheets.join(', ')}`);
-                fileInput.value = '';
-                return;
-            }
-            
-            let completed = 0;
-            const total = sheetsToUpload.length;
-            let hasError = false;
-            
-            for (const sheetName of sheetsToUpload) {
-                const sheetItem = document.createElement('div');
-                sheetItem.className = 'sheet-item uploading';
-                sheetItem.id = `sheet-${sheetName}`;
-                sheetItem.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${sheetName} - 上傳中...`;
-                sheetStatusList.appendChild(sheetItem);
-                
-                const worksheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet);
-                const targetKey = sheetMapping[sheetName];
-                
-                try {
-                    const response = await fetch(`${API_URL.replace('/exec', '')}/api/upload/${targetKey}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            data: jsonData,
-                            secret: 'WKTS_UPLOAD_SECRET'
-                        })
-                    });
-                    
-                    const result = await response.json();
-                    const itemElement = document.getElementById(`sheet-${sheetName}`);
-                    
-                    if (result.success) {
-                        itemElement.className = 'sheet-item success';
-                        itemElement.innerHTML = `<i class="fas fa-check-circle"></i> ${sheetName} - 成功上傳 ${jsonData.length} 筆`;
-                    } else {
-                        itemElement.className = 'sheet-item error';
-                        itemElement.innerHTML = `<i class="fas fa-times-circle"></i> ${sheetName} - 上傳失敗: ${result.msg}`;
-                        hasError = true;
-                    }
-                } catch (err) {
-                    const itemElement = document.getElementById(`sheet-${sheetName}`);
-                    itemElement.className = 'sheet-item error';
-                    itemElement.innerHTML = `<i class="fas fa-times-circle"></i> ${sheetName} - 網路錯誤: ${err.message}`;
-                    hasError = true;
-                }
-                
-                completed++;
-                progressBar.style.width = `${(completed / total) * 100}%`;
-            }
-            
-            if (hasError) {
-                alert(`⚠️ 部分工作表上傳失敗，請檢查後重試`);
-                fileInput.value = '';
-            } else {
-                alert(`✅ 上傳完成！共 ${total} 個工作表已更新到 R2`);
-                if (uploadModal) uploadModal.hide();
-                fileInput.value = '';
-                
-                showLoading(true);
-                try {
-                    await loadMidnightQuotaFromR2(true);
-                    await loadVehicles(true);
-                    updateMidnightQuotaPanel(vehiclesData, currentUserViewDistricts);
-                    showLoading(false);
-                } catch (err) {
-                    console.error("重新載入資料失敗:", err);
-                    showLoading(false);
-                    if (confirm("資料已上傳成功，但重新載入失敗。是否重新整理頁面？")) {
-                        location.reload();
-                    }
-                }
-            }
-        } catch (err) {
-            console.error('上傳錯誤:', err);
-            sheetStatusList.innerHTML = `<div class="alert alert-danger">上傳失敗: ${err.message}</div>`;
-            alert(`上傳失敗: ${err.message}`);
-            fileInput.value = '';
-        }
-    }
-    
-    function downloadSystemTemplate() {
-        const sheets = {
-            'Users': [
-                ['id', 'password', 'role', 'district', 'viewDistricts'],
-                ['WKTS', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', '超級管理員', 'WKTS', 'all'],
-                ['Sham Shui Po', 'ecd71870d1963316a97e3ac3408c9835ad8cf0f3c1bc703527c30265534f75ae', '區域主管', 'Sham Shui Po', 'Sham Shui Po']
-            ],
-            'Vehicles': [
-                ['車牌號碼', 'PGVW', '開始日期', '有效日期', '車輛每日上限', '凌晨授權', '所屬區域', '區域每日上限', '建立者', '聯絡人', '電話', '電子郵件'],
-                ['AB1234', '5.5', '2024-01-01', '2025-12-31', '5', 'Y', 'Sham Shui Po', '50', 'WKTS', '陳先生', '91234567', 'chan@fehd.gov.hk']
-            ],
-            'Expired': [
-                ['車牌號碼', 'PGVW', '開始日期', '有效日期', '每日上限', '凌晨授權', '所屬區域']
-            ],
-            'DistrictQuota': [
-                ['區域', '每日上限'],
-                ['Sham Shui Po', '50'],
-                ['Mong Kok', '60']
-            ],
-            'MidnightLimit': [
-                ['區域', '凌晨上限'],
-                ['Sham Shui Po', '5'],
-                ['Mong Kok', '8']
-            ],
-            'Email': [
-                ['Email', '備註'],
-                ['epd_admin@epd.gov.hk', '環保署管理員']
-            ]
-        };
-        
-        const wb = XLSX.utils.book_new();
-        for (const [sheetName, data] of Object.entries(sheets)) {
-            const ws = XLSX.utils.aoa_to_sheet(data);
-            XLSX.utils.book_append_sheet(wb, ws, sheetName);
-        }
-        XLSX.writeFile(wb, 'System_Data_Template.xlsx');
-    }
-    
-    // 新增車輛表單提交處理
+    // ==================== 表單提交事件 ====================
     document.getElementById('vehicleForm')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         
@@ -1638,10 +1304,6 @@
         if (!rawDistrict) { document.getElementById('district').classList.add('is-invalid'); isValid = false; }
         else { document.getElementById('district').classList.remove('is-invalid'); }
         
-        if (isNaN(vehicleDailyLimit) || vehicleDailyLimit < 1 || vehicleDailyLimit > 100) {
-            document.getElementById('vehicleDailyLimit').classList.add('is-invalid'); isValid = false;
-        } else { document.getElementById('vehicleDailyLimit').classList.remove('is-invalid'); }
-        
         if (!contactPerson) { document.getElementById('contactPerson').classList.add('is-invalid'); isValid = false; }
         else { document.getElementById('contactPerson').classList.remove('is-invalid'); }
         
@@ -1659,6 +1321,7 @@
         }
         
         const district = standardizeDistrict(rawDistrict);
+        const districtDailyLimit = getDistrictDailyLimit(district);
         
         // 檢查是否已存在相同車牌和區域的車輛
         const existingIndex = vehiclesData.findIndex(v => 
@@ -1673,11 +1336,11 @@
                 const confirmMsg = `⚠️ 車輛 ${plate} (${district}) 已存在！\n` +
                                    `舊有效日期: ${existingExpiry || '-'}\n` +
                                    `新有效日期: ${expiryDate}\n\n` +
-                                   `新記錄的有效日期較長，將會取代舊記錄。\n是否繼續？`;
+                                   `是否取代舊記錄？`;
                 if (!confirm(confirmMsg)) return;
                 await callAPI('deleteVehicle', { plate });
             } else {
-                alert(`❌ 車輛 ${plate} (${district}) 已存在！\n現有有效日期: ${existingExpiry || '-'}\n新有效日期: ${expiryDate}\n\n現有記錄的有效日期較長或相同，已保留原有記錄。`);
+                alert(`❌ 車輛 ${plate} (${district}) 已存在！\n現有有效日期較長或相同，已保留原有記錄。`);
                 return;
             }
         }
@@ -1689,15 +1352,16 @@
             return;
         }
         
-        const data = { plate, pgvw, startDate, expiryDate, vehicleDailyLimit, midnight, district,
-                       contactPerson, contactTel, contactEmail };
+        const formData = { 
+            plate, pgvw, startDate, expiryDate, vehicleDailyLimit, midnight, district,
+            districtDailyLimit, contactPerson, contactTel, contactEmail 
+        };
         
         showLoading(true, "🚗 新增車輛中...");
         try {
-            const result = await callAPI('addVehicle', { data });
+            const result = await callAPI('addVehicle', { data: formData });
             if (result.success) {
                 alert(result.msg);
-                localStorage.removeItem('vehicles_cache_' + currentSession.userId);
                 // 清空表單
                 document.getElementById('plate').value = "";
                 document.getElementById('pgvw').value = "";
@@ -1708,6 +1372,7 @@
                 document.getElementById('contactTel').value = "";
                 document.getElementById('contactEmail').value = "";
                 document.getElementById('midnight').value = "N";
+                document.getElementById('district').value = "";
                 await loadVehicles(true);
             } else {
                 alert("操作失敗：" + result.msg);
@@ -1719,12 +1384,52 @@
         }
     });
     
+    // ==================== 初始化用戶下拉選單 ====================
+    async function initUserDropdown() {
+        await loadUsersFromR2();
+        const select = document.getElementById('userId');
+        if (select && Object.keys(usersMap).length) {
+            select.innerHTML = '<option value="">-- 請選擇用戶 --</option>';
+            for (const [id, user] of Object.entries(usersMap)) {
+                if (currentRole === 'fehd' && (user.role === '區域主管' || user.role === '超級管理員')) {
+                    select.innerHTML += `<option value="${id}">${id}</option>`;
+                }
+                if (currentRole === 'epd' && (user.role === '轉運站職員' || user.role === '超級管理員')) {
+                    select.innerHTML += `<option value="${id}">${id}</option>`;
+                }
+            }
+        }
+    }
+    
+    // ==================== 設定初始角色 ====================
+    let urlRole = new URLSearchParams(window.location.search).get('role');
+    if (urlRole === 'weighbridge') urlRole = 'epd';
+    currentRole = (urlRole === 'epd') ? 'epd' : 'fehd';
+    
+    document.getElementById('loginTitle').innerHTML = currentRole === 'fehd' ? '食環署車輛管理系統' : '環保署車輛管理系統';
+    document.getElementById('loginBtn').innerHTML = currentRole === 'fehd' ? '食環署登入' : '環保署登入';
+    document.getElementById('mainTitle').innerHTML = currentRole === 'fehd' ? '食環署車輛管理系統' : '環保署車輛管理系統';
+    
+    // 顯示/隱藏表單
+    const formSection = document.getElementById('vehicleFormSection');
+    const batchSection = document.getElementById('batchSection');
+    if (formSection) formSection.style.display = currentRole === 'fehd' ? 'block' : 'none';
+    if (batchSection) batchSection.style.display = currentRole === 'fehd' ? 'block' : 'none';
+    
+    // 初始化
+    initUserDropdown();
+    
+    // 設定開始日期預設值
+    const today = new Date();
+    const yyyy = today.getFullYear(), mm = String(today.getMonth() + 1).padStart(2, '0'), dd = String(today.getDate()).padStart(2, '0');
+    const startDateInput = document.getElementById('startDate');
+    if (startDateInput) startDateInput.value = `${yyyy}-${mm}-${dd}`;
+    
     // 註冊全域函數
     window.sortTable = sortTable;
     window.filterTable = filterTable;
     window.doLogin = doLogin;
     window.logout = logout;
-    window.batchUpload = batchUpload;
     window.deleteVehicle = deleteVehicle;
     window.exportExcel = exportExcel;
     window.loadVehicles = loadVehicles;
@@ -1732,52 +1437,7 @@
     window.handleEnterKey = handleEnterKey;
     window.goToPage = goToPage;
     window.toggleMidnightTop = toggleMidnightTop;
-    window.downloadFEHDTemplate = downloadFEHDTemplate;
     window.openUploadModal = openUploadModal;
-    window.uploadSystemExcel = uploadSystemExcel;
-    window.downloadSystemTemplate = downloadSystemTemplate;
-    
-    (async function initByRole() {
-        useDefaultQuota();
-        
-        let urlRole = new URLSearchParams(window.location.search).get('role');
-        if (urlRole === 'weighbridge') urlRole = 'epd';
-        currentRole = (urlRole === 'epd') ? 'epd' : 'fehd';
-        if (currentRole === 'fehd') {
-            document.getElementById('loginTitle').innerHTML = '食環署車輛管理系統';
-            document.getElementById('mainTitle').innerHTML = '食環署車輛管理系統';
-            document.getElementById('loginBtn').innerHTML = '食環署登入';
-            const formSection = document.getElementById('vehicleFormSection');
-            const batchSection = document.getElementById('batchSection');
-            if (formSection) formSection.style.display = 'block';
-            if (batchSection) batchSection.style.display = 'block';
-        } else {
-            document.getElementById('loginTitle').innerHTML = '環保署車輛管理系統';
-            document.getElementById('mainTitle').innerHTML = '環保署車輛管理系統';
-            document.getElementById('loginBtn').innerHTML = '環保署登入';
-            const formSection = document.getElementById('vehicleFormSection');
-            const batchSection = document.getElementById('batchSection');
-            if (formSection) formSection.style.display = 'none';
-            if (batchSection) batchSection.style.display = 'none';
-        }
-        
-        const today = new Date();
-        const yyyy = today.getFullYear(), mm = String(today.getMonth() + 1).padStart(2, '0'), dd = String(today.getDate()).padStart(2, '0');
-        const startDateInput = document.getElementById('startDate');
-        if (startDateInput) startDateInput.value = `${yyyy}-${mm}-${dd}`;
-        
-        try {
-            const result = await callAPI('getUserList');
-            if (result.success && result.users) {
-                localStorage.setItem('system_users_cache', JSON.stringify(result.users));
-                renderUserDropdown(result.users);
-            }
-        } catch (err) {
-            console.error("背景載入用戶列表錯誤:", err);
-        }
-        
-        uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
-    })();
 </script>
 </body>
 </html>
