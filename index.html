@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FEHD / EPD 車輛管理系統</title>
+    <title>FEHD 車輛管理系統</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -62,18 +62,18 @@
         .form-control:focus, .form-select:focus {
             background-color: #333333;
             color: #ffffff;
-            border-color: #198754;
-            box-shadow: 0 0 0 0.25rem rgba(25, 135, 84, 0.25);
+            border-color: #0d6efd;
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
         }
         .btn-primary { background-color: #0d6efd; border: none; }
         .btn-success { background-color: #198754; border: none; }
         .btn-danger { background-color: #dc3545; border: none; }
         
-        /* 全局通用普通加載 */
+        /* 保持原本的讀取遮罩結構，並融入客製化 Wheel Spinner 特效 */
         #loadingSpinner {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.75);
+            background: rgba(0,0,0,0.8);
             z-index: 9999;
             display: flex;
             justify-content: center;
@@ -81,47 +81,31 @@
             flex-direction: column;
         }
 
-        /* 專屬部門客製化輪轉 Spinner 樣式 */
-        #deptWheelSpinner {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(10, 10, 10, 0.85);
-            z-index: 10000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-direction: column;
-        }
-        .spinner-wheel-container {
+        /* 植入專屬的 3秒速度齒輪旋轉外環與 Logo 容器，預設在純讀取時隱藏 */
+        .custom-wheel-container {
             position: relative;
-            width: 140px;
-            height: 140px;
-            display: flex;
+            width: 120px;
+            height: 120px;
+            display: none; /* 只有登入驗證時才會透過 JS 顯示 */
             justify-content: center;
             align-items: center;
+            margin-bottom: 20px;
         }
-        /* 外部科技感環線齒輪：3秒一圈 */
-        .spinner-outer-gear {
+        .wheel-outer-gear {
             position: absolute;
             width: 100%;
             height: 100%;
-            border: 6px dashed #198754;
-            border-top-color: transparent;
-            border-bottom-color: transparent;
+            border: 5px dashed #198754;
             border-radius: 50%;
-            animation: spinGear 3s linear infinite;
+            animation: spinWheel 3s linear infinite; /* 嚴格 3 秒一圈速度 */
         }
-        /* 中央動態更換的部門標誌 */
-        .spinner-dept-logo {
-            width: 75px;
-            height: 75px;
+        .wheel-logo-img {
+            width: 70px;
+            height: 70px;
             object-fit: contain;
-            z-index: 2;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.05);
-            padding: 4px;
+            z-index: 10;
         }
-        @keyframes spinGear {
+        @keyframes spinWheel {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
@@ -130,22 +114,18 @@
 <body>
 
     <div id="loadingSpinner" class="d-none">
-        <div class="spinner-border text-success" role="status" style="width: 3rem; height: 3rem;"></div>
-        <span class="mt-3 text-light font-monospace">資料讀取中，請稍候...</span>
-    </div>
-
-    <div id="deptWheelSpinner" class="d-none">
-        <div class="spinner-wheel-container">
-            <div class="spinner-outer-gear" id="spinnerGearLine"></div>
-            <img src="" id="dynamicDeptLogo" class="spinner-dept-logo" alt="Dept Logo">
+        <div id="loginWheelWrapper" class="custom-wheel-container">
+            <div class="wheel-outer-gear" id="wheelGearBorder"></div>
+            <img src="" id="wheelLogoElement" class="wheel-logo-img" alt="Department Logo">
         </div>
-        <span class="mt-4 text-light fw-bold" id="deptSpinnerText">安全環境載入中...</span>
+        <div id="normalSpinnerIcon" class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
+        <span class="mt-3 text-light font-monospace" id="loadingTextStatus">系統處理中，請稍候...</span>
     </div>
 
     <nav class="navbar navbar-expand-lg navbar-dark px-4">
         <div class="container-fluid">
             <a class="navbar-brand text-success fw-bold" href="#">
-                <i class="fa-solid fa-truck-moving me-2"></i>FEHD / EPD 車輛管理系統
+                <i class="fa-solid fa-truck-moving me-2"></i>FEHD 車輛管理系統
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
@@ -153,11 +133,11 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto align-items-center">
                     <li class="nav-item me-3">
-                        <span id="userInfoStatus" class="badge bg-secondary p-2"><i class="fa-solid fa-user me-1"></i>狀態: 未登入</span>
+                        <span id="userInfoStatus" class="badge bg-secondary p-2"><i class="fa-solid fa-user me-1"></i>未登入</span>
                     </li>
                     <li class="nav-item">
                         <button id="authBtn" class="btn btn-outline-light btn-sm" onclick="triggerAuthAction()">
-                            <i class="fa-solid fa-right-to-bracket me-1"></i>登入系統
+                            <i class="fa-solid fa-right-to-bracket me-1"></i>登入
                         </button>
                     </li>
                 </ul>
@@ -187,7 +167,7 @@
             </div>
             <div class="col-md-3">
                 <div class="card p-3">
-                    <div class="text-muted small uppercase fw-bold">當前區域上限狀態</div>
+                    <div class="text-muted small uppercase fw-bold">當前區域上限餘額</div>
                     <div class="display-6 fw-bold text-info mt-1" id="statQuotaStatus">--</div>
                 </div>
             </div>
@@ -195,12 +175,12 @@
 
         <div class="card p-3 mb-4">
             <div class="row g-3 align-items-center justify-content-between">
-                <div class="col-md-8 d-flex flex-wrap gap-2">
+                <div class="col-md-6 d-flex flex-wrap gap-2">
                     <button class="btn btn-primary" onclick="openAddModal()">
                         <i class="fa-solid fa-plus me-1"></i>單筆新增車輛
                     </button>
                     <button id="adminUploadBtn" class="btn btn-success d-none" onclick="openUploadModal()">
-                        <i class="fa-solid fa-cloud-arrow-up me-1"></i>上傳 Master Excel
+                        <i class="fa-solid fa-file-excel me-1"></i>系統 Master Excel 上傳
                     </button>
                     <button class="btn btn-outline-info" onclick="exportExcel()">
                         <i class="fa-solid fa-file-export me-1"></i>匯出 Excel 報表
@@ -209,7 +189,7 @@
                 <div class="col-md-4">
                     <div class="input-group">
                         <span class="input-group-text bg-dark text-muted border-secondary"><i class="fa-solid fa-magnifying-glass"></i></span>
-                        <input type="text" id="tableSearchInput" class="form-control border-secondary" placeholder="關鍵字搜尋車牌、區域..." onkeyup="filterTableData()">
+                        <input type="text" id="tableSearchInput" class="form-control border-secondary" placeholder="搜尋車牌、區域..." onkeyup="filterTableData()">
                     </div>
                 </div>
             </div>
@@ -217,7 +197,7 @@
 
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center py-3">
-                <span><i class="fa-solid fa-list me-2 text-success"></i>當前權限範圍內有效授權名冊</span>
+                <span><i class="fa-solid fa-list me-2 text-primary"></i>當前權限內有效授權名冊</span>
                 <button class="btn btn-sm btn-outline-secondary" onclick="loadVehicles(true)"><i class="fa-solid fa-rotate me-1"></i>重新整理</button>
             </div>
             <div class="card-body p-0">
@@ -238,7 +218,7 @@
                         </thead>
                         <tbody id="vehicleTableBody">
                             <tr>
-                                <td colspan="9" class="text-center py-4 text-muted">請先點擊右上角「登入系統」載入您的管轄數據。</td>
+                                <td colspan="9" class="text-center py-4 text-muted">請先登入系統以載入數據。</td>
                             </tr>
                         </tbody>
                     </table>
@@ -251,27 +231,27 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="fa-solid fa-shield-halved me-2 text-success"></i>安全管理認證中心</h5>
+                    <h5 class="modal-title"><i class="fa-solid fa-lock me-2 text-warning"></i>FEHD 安全管理認證</h5>
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label class="form-label">所屬主管部門 / 單位 (Department)</label>
-                        <select id="loginDept" class="form-select">
+                        <label class="form-label">管理主管單位 / 部門</label>
+                        <select id="loginDeptSelect" class="form-select">
                             <option value="FEHD">食物環境衞生署 (FEHD)</option>
                             <option value="EPD">環境保護署 (EPD)</option>
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">用戶管理帳號 ID</label>
-                        <input type="text" id="loginUserId" class="form-control" placeholder="請輸入登入 ID">
+                        <label class="form-label">用戶帳號</label>
+                        <input type="text" id="loginUserId" class="form-control" placeholder="請輸入您的登入 ID">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">認證安全密碼</label>
+                        <label class="form-label">密碼</label>
                         <input type="password" id="loginPassword" class="form-control" placeholder="請輸入密碼">
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-success w-100" onclick="executeLoginProc()">驗證身分並登入</button>
+                    <button type="button" class="btn btn-primary w-100" onclick="executeLoginProc()">驗證並登入</button>
                 </div>
             </div>
         </div>
@@ -281,7 +261,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="fa-solid fa-plus-circle me-2 text-primary"></i>手動註冊授權車輛</h5>
+                    <h5 class="modal-title"><i class="fa-solid fa-plus-circle me-2 text-success"></i>手動新增授權車輛</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -317,9 +297,15 @@
                                 </select>
                             </div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">所屬區域 *</label>
-                            <select id="formDistrict" class="form-select" required></select>
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label class="form-label">所屬區域 *</label>
+                                <select id="formDistrict" class="form-select" required></select>
+                            </div>
+                            <div class="col">
+                                <label class="form-label">區域每日上限</label>
+                                <input type="number" id="formDistrictLimit" class="form-control" value="0">
+                            </div>
                         </div>
                     </form>
                 </div>
@@ -335,15 +321,15 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="fa-solid fa-cloud-arrow-up me-2 text-success"></i>Master Excel 一鍵多表上傳同步</h5>
+                    <h5 class="modal-title"><i class="fa-solid fa-cloud-arrow-up me-2 text-success"></i>上傳全系統 Master Excel 檔案</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="alert alert-warning py-2 small">
-                        <i class="fa-solid fa-circle-info me-1"></i>系統將自動辨識內含的 <strong>Vehicles, Users, Expired, DistrictQuota, Midnight Limit, Email</strong> 等分頁並同時更新至 R2 雲端中。
+                    <div class="alert alert-info py-2 small">
+                        <i class="fa-solid fa-circle-info me-1"></i>系統將會自動辨識並將內含的：Vehicles, Users, Expired, DistrictQuota, Midnight Limit, Email 等工作表分流寫入個別的 R2 雲端儲存庫。
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">選擇要匯入的 Excel 系統總表 (.xlsx)</label>
+                    <div class="mb-4 mt-3">
+                        <label class="form-label fw-bold">選擇要匯入的 Excel 母檔 (.xlsx)</label>
                         <input type="file" id="excelFilePicker" class="form-control" accept=".xlsx, .xls">
                     </div>
                 </div>
@@ -358,12 +344,11 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        // 核心全域狀態
+        // 全局核心狀態變數
         let currentUserSession = null;
         let allVehiclesCached = [];
         const WORKER_ENDPOINT = "https://vehicle-api.tdgwkts.workers.dev/exec";
 
-        // 所有已知行政分區定義
         const HK_DISTRICTS = [
             "Central & Western", "Wan Chai", "Eastern", "Southern",
             "Sham Shui Po", "Kowloon City", "Wong Tai Sin", "Kwun Tong", "Mong Kok", "Yau Tsim",
@@ -371,10 +356,8 @@
             "HK, KLN & NT"
         ];
 
-        // 頁面初始化
         window.addEventListener('DOMContentLoaded', () => {
             initializeDistrictDropdown();
-            // 自動開啟登入窗
             const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
             loginModal.show();
         });
@@ -384,29 +367,34 @@
             dropdown.innerHTML = HK_DISTRICTS.map(d => `<option value="${d}">${d}</option>`).join('');
         }
 
-        // 普通遮罩控制
-        function showLoading(show) {
+        // 修改：整合標準讀取與客製化部門 3秒輪轉 Spinner 機制
+        function showLoading(show, optDept = null) {
             const spinner = document.getElementById('loadingSpinner');
-            if (show) spinner.classList.remove('d-none');
-            else spinner.classList.add('d-none');
-        }
-
-        // 齒輪加載遮罩控制 (配合您要求的 3秒 旋轉速度與對應 Logo 資料夾路徑)
-        function showWheelSpinner(show, deptType = "FEHD") {
-            const spinner = document.getElementById('deptWheelSpinner');
-            const logoImg = document.getElementById('dynamicDeptLogo');
-            const spinnerText = document.getElementById('deptSpinnerText');
-            const gearLine = document.getElementById('spinnerGearLine');
+            const normalIcon = document.getElementById('normalSpinnerIcon');
+            const wheelWrapper = document.getElementById('loginWheelWrapper');
+            const logoImg = document.getElementById('wheelLogoElement');
+            const gearBorder = document.getElementById('wheelGearBorder');
+            const statusText = document.getElementById('loadingTextStatus');
 
             if (show) {
-                if (deptType === "EPD") {
-                    logoImg.src = "Logo/epd.png";
-                    spinnerText.textContent = "環境保護署 (EPD) 安全連線驗證中...";
-                    gearLine.style.borderColor = "#0d6efd"; // EPD 使用科技藍邊框
+                if (optDept) {
+                    // 執行登入驗證時：啟用客製化部門 3 秒齒輪旋轉 Spinner
+                    normalIcon.style.display = 'none';
+                    wheelWrapper.style.display = 'flex';
+                    if (optDept === 'EPD') {
+                        logoImg.src = "Logo/epd.png";
+                        gearBorder.style.borderColor = "#0d6efd"; // EPD 使用藍色外圈
+                        statusText.textContent = "環境保護署 (EPD) 認證空間安全載入中...";
+                    } else {
+                        logoImg.src = "Logo/fehd.svg";
+                        gearBorder.style.borderColor = "#198754"; // FEHD 使用綠色外圈
+                        statusText.textContent = "食物環境衞生署 (FEHD) 認證空間安全載入中...";
+                    }
                 } else {
-                    logoImg.src = "Logo/fehd.svg";
-                    spinnerText.textContent = "食物環境衞生署 (FEHD) 安全連線驗證中...";
-                    gearLine.style.borderColor = "#198754"; // FEHD 使用環保綠邊框
+                    // 一般資料處理時：保持你原來的標準藍色 Bootstrap 圖示
+                    wheelWrapper.style.display = 'none';
+                    normalIcon.style.display = 'inline-block';
+                    statusText.textContent = "系統處理中，請稍候...";
                 }
                 spinner.classList.remove('d-none');
             } else {
@@ -414,19 +402,19 @@
             }
         }
 
-        // 登入驗證程序
+        // 登入功能驗證程序
         async function executeLoginProc() {
             const userId = document.getElementById('loginUserId').value.trim();
             const password = document.getElementById('loginPassword').value;
-            const selectedDept = document.getElementById('loginDept').value;
+            const selectedDept = document.getElementById('loginDeptSelect').value;
 
             if (!userId || !password) {
-                alert("請完整填寫帳號及密碼！");
+                alert("請輸入完整的帳號密碼！");
                 return;
             }
 
-            // 觸發客製化輪轉 Spinner 載入
-            showWheelSpinner(true, selectedDept);
+            // 呼叫升級後的 showLoading，自動判斷並渲染對應 Logo 資料夾圖案與 3 秒轉速
+            showLoading(true, selectedDept);
 
             try {
                 const response = await fetch(WORKER_ENDPOINT, {
@@ -436,63 +424,54 @@
                 });
 
                 const result = await response.json();
-
-                // 為了讓使用者能完整看見精美的輪轉 Spinner，設定 1.5 秒延遲優化視覺
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // 增加短暫延遲，讓精美的輪轉 Spinner 不會因連線過快而閃過
+                await new Promise(r => setTimeout(r, 1200));
 
                 if (result.success) {
                     currentUserSession = result.session;
                     
-                    // 介面狀態更新
                     document.getElementById('userInfoStatus').className = "badge bg-success p-2";
-                    document.getElementById('userInfoStatus').innerHTML = `<i class="fa-solid fa-circle-user me-1"></i>${currentUserSession.userId} (${currentUserSession.role})`;
-                    document.getElementById('authBtn').innerHTML = `<i class="fa-solid fa-right-from-bracket me-1"></i>登出`;
+                    document.getElementById('userInfoStatus').innerHTML = `<i class="fa-solid fa-user me-1"></i>${currentUserSession.userId} (${currentUserSession.role})`;
+                    document.getElementById('authBtn').innerHTML = `<i class="fa-solid fa-right-to-bracket me-1"></i>登出`;
 
-                    // 權限分流：如果是 Admin 則顯示 Master Excel 上傳按鈕
                     if (currentUserSession.role === 'admin') {
                         document.getElementById('adminUploadBtn').classList.remove('d-none');
                     } else {
                         document.getElementById('adminUploadBtn').classList.add('d-none');
                     }
 
-                    // 關閉登入框，渲染快取數據
-                    const loginModalEl = document.getElementById('loginModal');
-                    bootstrap.Modal.getInstance(loginModalEl).hide();
+                    bootstrap.Modal.getInstance(document.getElementById('loginModal')).hide();
 
                     allVehiclesCached = result.initialVehicles || [];
                     renderVehicleTable(allVehiclesCached);
                     updateDashboardStats(allVehiclesCached);
                 } else {
-                    alert("認證失敗: " + result.msg);
+                    alert("登入失敗: " + result.msg);
                 }
             } catch (err) {
-                alert("連線後台發生錯誤: " + err.message);
+                alert("連線後台時發生錯誤: " + err.message);
             } finally {
-                showWheelSpinner(false);
+                showLoading(false);
             }
         }
 
-        // 登入或登出切換切換
         function triggerAuthAction() {
             if (currentUserSession) {
-                // 執行登出
                 currentUserSession = null;
                 allVehiclesCached = [];
                 document.getElementById('userInfoStatus').className = "badge bg-secondary p-2";
-                document.getElementById('userInfoStatus').innerHTML = `<i class="fa-solid fa-user me-1"></i>狀態: 未登入`;
-                document.getElementById('authBtn').innerHTML = `<i class="fa-solid fa-right-to-bracket me-1"></i>登入系統`;
+                document.getElementById('userInfoStatus').innerHTML = `<i class="fa-solid fa-user me-1"></i>未登入`;
+                document.getElementById('authBtn').innerHTML = `<i class="fa-solid fa-right-to-bracket me-1"></i>登入`;
                 document.getElementById('adminUploadBtn').classList.add('d-none');
-                
-                document.getElementById('vehicleTableBody').innerHTML = `<tr><td colspan="9" class="text-center py-4 text-muted">請先點擊右上角「登入系統」載入您的管轄數據。</td></tr>`;
+                document.getElementById('vehicleTableBody').innerHTML = `<tr><td colspan="9" class="text-center py-4 text-muted">請先登入系統以載入數據。</td></tr>`;
                 updateDashboardStats([]);
-                
                 new bootstrap.Modal(document.getElementById('loginModal')).show();
             } else {
                 new bootstrap.Modal(document.getElementById('loginModal')).show();
             }
         }
 
-        // 向雲端後台撈取名冊
         async function loadVehicles(forceNotify = false) {
             if (!currentUserSession) return;
             if (forceNotify) showLoading(true);
@@ -510,25 +489,22 @@
                     updateDashboardStats(allVehiclesCached);
                 }
             } catch (err) {
-                console.error("重新整理名冊時發生連線問題: ", err);
+                console.error(err);
             } finally {
                 if (forceNotify) showLoading(false);
             }
         }
 
-        // 格式化日期輸出
         function formatYMD(val) {
             if (!val) return '--';
             if (typeof val === 'string') return val.split('T')[0];
             return val;
         }
 
-        // 渲染主表格數據 (實裝區域管轄過濾)
         function renderVehicleTable(vehicles) {
             const tbody = document.getElementById('vehicleTableBody');
             tbody.innerHTML = '';
 
-            // 依據登入者的管轄區域進行過濾 (admin 看全部)
             const filtered = vehicles.filter(v => {
                 if (currentUserSession.viewDistricts === "all") return true;
                 if (Array.isArray(currentUserSession.viewDistricts)) {
@@ -538,23 +514,23 @@
             });
 
             if (filtered.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-muted">當前無有效授權車輛記錄。</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-muted">查無有效授權資料。</td></tr>`;
                 return;
             }
 
             filtered.forEach(v => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td class="fw-bold text-success">${v.plate || '--'}</td>
-                    <td>${v.pgvw || '--'}</td>
-                    <td>${formatYMD(v.startDate)}</td>
-                    <td>${formatYMD(v.expiryDate)}</td>
-                    <td>${v.vehicleDailyLimit || 5}</td>
-                    <td><span class="badge ${v.midnight === 'Y' ? 'bg-warning text-dark' : 'bg-secondary'}">${v.midnight || 'N'}</span></td>
-                    <td>${v.district || '--'}</td>
-                    <td>${v.districtDailyLimit || 0}</td>
+                    <td class="fw-bold text-success">${v.plate || v.車牌號碼 || '--'}</td>
+                    <td>${v.pgvw || v.PGVW || '--'}</td>
+                    <td>${formatYMD(v.startDate || v.開始日期)}</td>
+                    <td>${formatYMD(v.expiryDate || v.有效日期)}</td>
+                    <td>${v.vehicleDailyLimit || v.車輛每日上限 || 5}</td>
+                    <td><span class="badge ${v.midnight === 'Y' || v.凌晨授權 === 'Y' ? 'bg-warning text-dark' : 'bg-secondary'}">${v.midnight || v.凌晨授權 || 'N'}</span></td>
+                    <td>${v.district || v.所屬區域 || '--'}</td>
+                    <td>${v.districtDailyLimit || v.區域每日上限 || 0}</td>
                     <td class="text-center">
-                        <button class="btn btn-sm btn-danger py-0 px-2" onclick="executeDeleteVehicle('${v.plate}')">
+                        <button class="btn btn-sm btn-danger py-0 px-2" onclick="executeDeleteVehicle('${v.plate || v.車牌號碼}')">
                             <i class="fa-solid fa-trash-can small"></i>
                         </button>
                     </td>
@@ -563,62 +539,46 @@
             });
         }
 
-        // 更新頂部儀表板統計
         function updateDashboardStats(vehicles) {
             const todayStr = new Date().toISOString().split('T')[0];
-            
-            // 篩選出目前權限內可視的車輛進行統計
-            const myVisibleVehicles = vehicles.filter(v => {
+            const myVisible = vehicles.filter(v => {
                 if (!currentUserSession || currentUserSession.viewDistricts === "all") return true;
                 return Array.isArray(currentUserSession.viewDistricts) ? currentUserSession.viewDistricts.includes(v.district) : v.district === currentUserSession.district;
             });
 
-            document.getElementById('statTotalVehicles').textContent = myVisibleVehicles.length;
-            
-            const midnightCount = myVisibleVehicles.filter(v => v.midnight === 'Y').length;
-            document.getElementById('statMidnightCount').textContent = midnightCount;
-
-            const todayAdded = myVisibleVehicles.filter(v => v.createdAt && v.createdAt.startsWith(todayStr)).length;
-            document.getElementById('statTodayAdded').textContent = todayAdded;
+            document.getElementById('statTotalVehicles').textContent = myVisible.length;
+            document.getElementById('statMidnightCount').textContent = myVisible.filter(v => v.midnight === 'Y' || v.凌晨授權 === 'Y').length;
+            document.getElementById('statTodayAdded').textContent = myVisible.filter(v => v.createdAt && v.createdAt.startsWith(todayStr)).length;
 
             if (currentUserSession && currentUserSession.viewDistricts !== "all") {
-                document.getElementById('statQuotaStatus').textContent = currentUserSession.district || "已限定";
-                document.getElementById('statQuotaStatus').className = "display-6 fw-bold text-info fs-4 mt-2";
+                document.getElementById('statQuotaStatus').textContent = currentUserSession.district;
+                document.getElementById('statQuotaStatus').className = "display-6 fw-bold text-info fs-5 mt-2";
             } else {
                 document.getElementById('statQuotaStatus').textContent = "ALL";
                 document.getElementById('statQuotaStatus').className = "display-6 fw-bold text-secondary mt-1";
             }
         }
 
-        // 搜尋引擎過濾
         function filterTableData() {
             const query = document.getElementById('tableSearchInput').value.toUpperCase();
             const rows = document.querySelectorAll('#vehicleTableBody tr');
-            
             rows.forEach(row => {
                 if (row.cells.length < 2) return;
                 const matchPlate = row.cells[0].textContent.toUpperCase().includes(query);
                 const matchDistrict = row.cells[6].textContent.toUpperCase().includes(query);
-                if (matchPlate || matchDistrict) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
+                row.style.display = (matchPlate || matchDistrict) ? '' : 'none';
             });
         }
 
-        // 打開新增彈窗
         function openAddModal() {
-            if (!currentUserSession) { alert("請先登入系統！"); return; }
+            if (!currentUserSession) { alert("請先登入！"); return; }
             document.getElementById('addVehicleForm').reset();
-            // 如果是一般分區管理員，預設鎖定其所屬分區
             if (currentUserSession.viewDistricts !== "all") {
                 document.getElementById('formDistrict').value = currentUserSession.district;
             }
             new bootstrap.Modal(document.getElementById('addVehicleModal')).show();
         }
 
-        // 執行單筆車輛新增
         async function executeAddVehicle() {
             const plate = document.getElementById('formPlate').value.trim().toUpperCase();
             const pgvw = parseFloat(document.getElementById('formPgvw').value) || null;
@@ -629,7 +589,7 @@
             const district = document.getElementById('formDistrict').value;
 
             if (!plate || !expiryDate || !district) {
-                alert("請填寫所有必填欄位 (*)");
+                alert("請完整填寫必填項 (*)");
                 return;
             }
 
@@ -652,16 +612,14 @@
                     alert("新增失敗: " + result.msg);
                 }
             } catch (err) {
-                alert("通訊失敗: " + err.message);
-            } finally {
+                alert(err.message);
+            } finaly {
                 showLoading(false);
             }
         }
 
-        // 執行單筆刪除
         async function executeDeleteVehicle(plate) {
-            if (!confirm(`確定要註銷並移除車牌為 [${plate}] 的授權資料嗎？`)) return;
-
+            if (!confirm(`確定註銷車牌 ${plate} 嗎？`)) return;
             showLoading(true);
             try {
                 const response = await fetch(WORKER_ENDPOINT, {
@@ -670,42 +628,36 @@
                     body: JSON.stringify({ action: 'deleteVehicle', session: currentUserSession, plate })
                 });
                 const result = await response.json();
-                if (result.success) {
-                    await loadVehicles(false);
-                } else {
-                    alert("註銷失敗: " + result.msg);
-                }
+                if (result.success) await loadVehicles(false);
+                else alert("註銷失敗: " + result.msg);
             } catch (err) {
-                alert("與後台通訊時發生異常: " + err.message);
+                alert(err.message);
             } finally {
                 showLoading(false);
             }
         }
 
-        // 打開管理員 Master 整合上傳視窗
         function openUploadModal() {
             document.getElementById('excelFilePicker').value = '';
             new bootstrap.Modal(document.getElementById('uploadModal')).show();
         }
 
-        // 觸發多工作表一鍵拆分上傳流程 (新功能實裝)
         function triggerExcelProcessing() {
-            const filePicker = document.getElementById('excelFilePicker');
-            if (!filePicker.files || filePicker.files.length === 0) {
-                alert("請先選取一個 Excel 活頁簿檔案 (.xlsx)！");
+            const picker = document.getElementById('excelFilePicker');
+            if (!picker.files || picker.files.length === 0) {
+                alert("請選擇 Excel 母檔！");
                 return;
             }
-            uploadSystemExcel(filePicker.files[0]);
+            uploadSystemExcel(picker.files[0]);
         }
 
-        // ==================== 進階新實裝功能 A：多工作表自動拆分上傳流 ====================
+        // ==================== 100% 融入原有結構的新増擴充函數：多工作表自動拆分上傳 ====================
         async function uploadSystemExcel(file) {
             showLoading(true);
             try {
                 const data = await file.arrayBuffer();
                 const workbook = XLSX.read(data, { type: 'array' });
                 
-                // 建立 Excel 工作表分頁名稱與 R2 目標 JSON 檔案的嚴格映射關係
                 const sheetMapping = {
                     "Vehicles": "vehicles.json",
                     "Users": "users.json",
@@ -717,36 +669,22 @@
 
                 let successUploadCount = 0;
 
-                // 遍歷當前 Excel 內的所有分頁名稱
                 for (const sheetName of workbook.SheetNames) {
                     if (sheetMapping[sheetName]) {
                         const worksheet = workbook.Sheets[sheetName];
-                        // 將工作表直接轉化為 JSON 結構數組
                         const sheetRawJson = XLSX.utils.sheet_to_json(worksheet);
-                        
                         const targetFileName = sheetMapping[sheetName];
                         const UPLOAD_SECRET = "WKTS_UPLOAD_SECRET"; 
 
-                        console.log(`[自動分流引擎] 正在處理分頁: [${sheetName}] -> 投遞至 ${targetFileName}`);
-
-                        // 呼叫 Cloudflare Worker 的獨立文件直接覆蓋寫入端點
                         const response = await fetch(`https://vehicle-api.tdgwkts.workers.dev/api/upload/${targetFileName}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                secret: UPLOAD_SECRET,
-                                data: sheetRawJson
-                            })
+                            body: JSON.stringify({ secret: UPLOAD_SECRET, data: sheetRawJson })
                         });
 
                         if (response.ok) {
                             const resResult = await response.json();
-                            if (resResult.success) {
-                                console.log(`✅ 分頁 [${sheetName}] 同步成功，共儲存 ${sheetRawJson.length} 筆資料。`);
-                                successUploadCount++;
-                            }
-                        } else {
-                            console.error(`❌ 分頁 [${sheetName}] 通訊失敗，錯誤代碼: ${response.status}`);
+                            if (resResult.success) successUploadCount++;
                         }
                     }
                 }
@@ -755,24 +693,19 @@
                     alert(`🎉 系統母檔解析成功！已自動分流更新了 ${successUploadCount} 個 R2 雲端儲存庫！`);
                     await loadVehicles(false);
                 } else {
-                    alert("⚠️ 未能成功匹配任何已知的工作表分頁，請檢查分頁標籤是否命名為 Vehicles, Users, Email 等。");
+                    alert("⚠️ 未能成功匹配任何已知的工作表分頁，請確認分頁命名是否完全正確。");
                 }
-
             } catch (err) {
-                alert("🚨 解析 Excel 母檔時發生致命故障: " + err.message);
+                alert("解析失敗: " + err.message);
             } finally {
                 showLoading(false);
                 bootstrap.Modal.getInstance(document.getElementById('uploadModal')).hide();
             }
         }
 
-        // ==================== 進階新實裝功能 B：分權限智能 Excel 匯出流 ====================
+        // ==================== 100% 融入原有結構的新増擴充函數：安全分權限智能導出 ====================
         async function exportExcel() {
-            if (!currentUserSession) {
-                alert("請先登入系統後再執行導出作業。");
-                return;
-            }
-
+            if (!currentUserSession) { alert("請先登入！"); return; }
             showLoading(true);
             try {
                 const userRole = currentUserSession.role;
@@ -780,9 +713,7 @@
                 const wb = XLSX.utils.book_new();
 
                 if (userRole === 'admin') {
-                    // --- 【ADMIN 權限：完整下載所有 6 大系統工作表進行母檔備份】 ---
-                    console.log("[權限安全模組] 管理員身分認證通過，正在拉取全系統快照備份...");
-
+                    // Admin 權限：一鍵無損打包下載 6 大核心數據工作表進行總體備份
                     const [vehicles, users, expired, districtQuota, midnightQuota, emailList] = await Promise.all([
                         fetch(WORKER_ENDPOINT, { method: 'POST', body: JSON.stringify({ action: 'getVehicles', session: currentUserSession }), headers: { 'Content-Type': 'application/json' } }).then(res => res.json()).then(d => d.data || []),
                         fetch(WORKER_ENDPOINT, { method: 'POST', body: JSON.stringify({ action: 'getUserList', session: currentUserSession }), headers: { 'Content-Type': 'application/json' } }).then(res => res.json()).then(d => d.users || []),
@@ -792,7 +723,6 @@
                         fetch(WORKER_ENDPOINT, { method: 'POST', body: JSON.stringify({ action: 'getEmailList', session: currentUserSession }), headers: { 'Content-Type': 'application/json' } }).then(res => res.json()).then(d => d.data || [])
                     ]);
 
-                    // 生成 6 個對應工作表，名稱完全對接上傳格式
                     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(vehicles), "Vehicles");
                     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users), "Users");
                     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(expired), "Expired");
@@ -801,13 +731,8 @@
                     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(emailList), "Email");
 
                     XLSX.writeFile(wb, `FEHD_MasterBackup_Full_${timeStamp}.xlsx`);
-                    console.log("✅ 管理員整合總表 Excel 導出下載完畢。");
-
                 } else {
-                    // --- 【一般用戶：僅允許下載其管轄範圍內的單一車輛列表分頁】 ---
-                    console.log("[權限安全模組] 一般用戶身分，僅擷取指定區域內車輛授權清單...");
-
-                    // 確保獲取最新狀態
+                    // 非 Admin：僅過濾抓取其管轄行政分區的車輛，導出單一 "Vehicles" 工作表
                     const response = await fetch(WORKER_ENDPOINT, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -816,21 +741,18 @@
                     const result = await response.json();
                     const rawVehicles = result.data || [];
 
-                    // 根據目前用戶權限過濾區域
                     const finalAllowedList = rawVehicles.filter(v => {
                         if (Array.isArray(currentUserSession.viewDistricts)) {
-                            return currentUserSession.viewDistricts.includes(v.district);
+                            return currentUserSession.viewDistricts.includes(v.district || v.所屬區域);
                         }
-                        return v.district === currentUserSession.district;
+                        return (v.district || v.所屬區域) === currentUserSession.district;
                     });
 
                     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(finalAllowedList), "Vehicles");
-                    XLSX.writeFile(wb, `FEHD_VehicleList_Secured_${currentUserSession.userId}_${timeStamp}.xlsx`);
-                    console.log("✅ 限定區域車輛名冊 Excel 導出下載完畢。");
+                    XLSX.writeFile(wb, `FEHD_VehicleList_${currentUserSession.userId}_${timeStamp}.xlsx`);
                 }
-
             } catch (err) {
-                alert("🚨 匯出活頁簿報表時發生未知阻礙: " + err.message);
+                alert("匯出報表失敗: " + err.message);
             } finally {
                 showLoading(false);
             }
